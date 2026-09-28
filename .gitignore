@@ -1,0 +1,28 @@
+# secrets — real values live in ~/.secrets, never here
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+*.pem
+*.key
+id_rsa*
+
+# node
+node_modules/
+npm-debug.log*
+dist/
+*.tsbuildinfo
+
+# foundry (scoped to contracts/ — do NOT bare-match docs/, it would swallow the repo's own docs/)
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+contracts/broadcast/*/*/dry-run/
+contracts/docs/
+
+# editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
