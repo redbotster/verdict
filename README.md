@@ -3,7 +3,7 @@
 Oracle-settled milestone escrow on IMD + 1Claw. Full product spec: [docs/SPEC.md](docs/SPEC.md).
 Live-API day-one findings (read this before writing more integration code):
 [docs/DAY-ONE-FINDINGS.md](docs/DAY-ONE-FINDINGS.md).
-Contract security audit — 3 High (now fixed), 3 Medium + 5 Low + 1 Info (still open,
+Contract security audit — 3 High + 3 Medium (all fixed), 5 Low + 1 Info (still open,
 **read before deploying anything real**): [audits/2026-09-28/AUDIT-REPORT.md](audits/2026-09-28/AUDIT-REPORT.md).
 
 ## Layout
@@ -24,13 +24,12 @@ the full six-week shape. What exists right now:
 - Project structure and the full spec/findings docs.
 - A dedicated ops/resolver wallet, freshly generated, unfunded, stored at `~/.secrets/verdict.env`
   (never committed).
-- `MilestoneEscrow.sol` + Foundry tests (42/42 passing). A follow-up security audit (see above) found
-  3 High and 3 Medium issues the original tests didn't cover; the 3 High findings (constructor
-  funding trust model, weird-ERC20 handling, push-payment lockout) are now fixed — the payer signs
+- `MilestoneEscrow.sol` + Foundry tests (48/48 passing). A follow-up security audit (see above) found
+  3 High and 3 Medium issues the original tests didn't cover; all six are now fixed — the payer signs
   the exact deal terms rather than trusting a predicted deploy address, non-standard tokens are
-  rejected at construction, and settlement is pull-payment. The 3 Medium findings (deadline binding
-  on attestations, the challenge window having no actual challenge mechanism, and one already fixed
-  as a side effect) plus all Low/Info findings are still open — see the audit report.
+  rejected at construction, settlement is pull-payment, attestations are bound to the deadline with
+  freshness ordering, and the challenge window now lets a fresher oracle-signed correction actually
+  override a wrong `true`. Only Low/Info findings remain open — see the audit report.
 - The IMD client's free-tier operations (capabilities, quote, challenge, status, polling).
 
 What's deliberately not done yet, because it costs real money or needs information this pass

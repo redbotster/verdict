@@ -133,6 +133,13 @@ contract MilestoneEscrowTest is Test {
         });
     }
 
+    // A `false` answer only settles the deal once it's issued at or after the deadline — this warps
+    // time to exactly `deadline` and builds a matching attestation, for tests that need a valid refund.
+    function _deadlineFalseAttestation() internal returns (MilestoneEscrow.Attestation memory) {
+        vm.warp(deadline);
+        return _defaultAttestation(false);
+    }
+
     function _structHash(MilestoneEscrow.Attestation memory m) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -439,7 +446,7 @@ contract MilestoneEscrowTest is Test {
 
     function test_SubmitAttestation_FalseCreditsPayerImmediately() public {
         MilestoneEscrow escrow = _deployDefault();
-        MilestoneEscrow.Attestation memory m = _defaultAttestation(false);
+        MilestoneEscrow.Attestation memory m = _deadlineFalseAttestation();
         bytes memory sig = _signWith(oraclePk, address(escrow), m);
 
         escrow.submitAttestation(m, sig);
@@ -553,7 +560,7 @@ contract MilestoneEscrowTest is Test {
 
     function test_SubmitAttestation_RevertsWhenNotFunded_AfterFalseRefund() public {
         MilestoneEscrow escrow = _deployDefault();
-        MilestoneEscrow.Attestation memory mFalse = _defaultAttestation(false);
+        MilestoneEscrow.Attestation memory mFalse = _deadlineFalseAttestation();
         bytes memory sigFalse = _signWith(oraclePk, address(escrow), mFalse);
         escrow.submitAttestation(mFalse, sigFalse);
 
@@ -576,6 +583,97 @@ contract MilestoneEscrowTest is Test {
 
         vm.expectRevert(MilestoneEscrow.AlreadyResolvedTrue.selector);
         escrow.submitAttestation(m2, sig2);
+    }
+
+    // ---------------------------------------------------------------------
+    // Deadline binding
+    // ---------------------------------------------------------------------
+
+    function test_SubmitAttestation_RevertsOnPrematureFalse() public {
+        MilestoneEscrow escrow = _deployDefault();
+        MilestoneEscrow.Attestation memory m = _defaultAttestation(false); // issuedAt is deploy-time, well before deadline
+        bytes memory sig = _signWith(oraclePk, address(escrow), m);
+
+        vm.expectRevert(MilestoneEscrow.PrematureFalse.selector);
+        escrow.submitAttestation(m, sig);
+    }
+
+    function test_SubmitAttestation_RevertsOnTooLate() public {
+        MilestoneEscrow escrow = _deployDefault();
+        vm.warp(uint256(deadline) + uint256(GRACE) + 1);
+        MilestoneEscrow.Attestation memory m = _defaultAttestation(true);
+        bytes memory sig = _signWith(oraclePk, address(escrow), m);
+
+        vm.expectRevert(MilestoneEscrow.TooLate.selector);
+        escrow.submitAttestation(m, sig);
+    }
+
+    function test_SubmitAttestation_RevertsOnFutureIssuedAt() public {
+        MilestoneEscrow escrow = _deployDefault();
+        MilestoneEscrow.Attestation memory m = _defaultAttestation(true);
+        m.issuedAt = uint64(block.timestamp + 1 hours);
+        bytes memory sig = _signWith(oraclePk, address(escrow), m);
+
+        vm.expectRevert(MilestoneEscrow.BadIssuedAt.selector);
+        escrow.submitAttestation(m, sig);
+    }
+
+    // ---------------------------------------------------------------------
+    // Challenge window: a fresher oracle-signed false can override a true while the window is open
+    // ---------------------------------------------------------------------
+
+    function test_SubmitAttestation_FalseOverridesTrueWithinChallengeWindow() public {
+        MilestoneEscrow escrow = _deployDefault();
+        vm.warp(deadline); // the resolver acts at the deadline, not before
+        MilestoneEscrow.Attestation memory mTrue = _defaultAttestation(true);
+        bytes memory sigTrue = _signWith(oraclePk, address(escrow), mTrue);
+        escrow.submitAttestation(mTrue, sigTrue);
+        assertEq(escrow.trueAt(), block.timestamp);
+
+        vm.warp(block.timestamp + CHALLENGE_WINDOW / 2); // still inside the window
+        MilestoneEscrow.Attestation memory mCorrection = _defaultAttestation(false);
+        bytes memory sigCorrection = _signWith(oraclePk, address(escrow), mCorrection);
+        escrow.submitAttestation(mCorrection, sigCorrection);
+
+        assertEq(uint256(escrow.state()), uint256(MilestoneEscrow.State.Refunded));
+        assertEq(escrow.owed(payer), AMOUNT);
+
+        // release() can no longer pay the payee, even once the original window would have elapsed
+        vm.warp(mTrue.issuedAt + CHALLENGE_WINDOW);
+        vm.expectRevert(MilestoneEscrow.NotFunded.selector);
+        escrow.release();
+    }
+
+    function test_SubmitAttestation_RevertsOnStaleOverrideAttempt() public {
+        MilestoneEscrow escrow = _deployDefault();
+        vm.warp(deadline);
+        MilestoneEscrow.Attestation memory mTrue = _defaultAttestation(true);
+        bytes memory sigTrue = _signWith(oraclePk, address(escrow), mTrue);
+        escrow.submitAttestation(mTrue, sigTrue);
+
+        // A false with issuedAt <= the true's issuedAt can't override it, even though it's still within the window.
+        MilestoneEscrow.Attestation memory mStaleFalse = mTrue;
+        mStaleFalse.answer = false;
+        mStaleFalse.requestId = 2;
+        bytes memory sigStaleFalse = _signWith(oraclePk, address(escrow), mStaleFalse);
+
+        vm.expectRevert(MilestoneEscrow.StaleAttestation.selector);
+        escrow.submitAttestation(mStaleFalse, sigStaleFalse);
+    }
+
+    function test_SubmitAttestation_RevertsOnFalseAfterChallengeWindowCloses() public {
+        MilestoneEscrow escrow = _deployDefault();
+        vm.warp(deadline);
+        MilestoneEscrow.Attestation memory mTrue = _defaultAttestation(true);
+        bytes memory sigTrue = _signWith(oraclePk, address(escrow), mTrue);
+        escrow.submitAttestation(mTrue, sigTrue);
+
+        vm.warp(block.timestamp + CHALLENGE_WINDOW); // window has fully elapsed
+        MilestoneEscrow.Attestation memory mLateCorrection = _defaultAttestation(false);
+        bytes memory sigLateCorrection = _signWith(oraclePk, address(escrow), mLateCorrection);
+
+        vm.expectRevert(MilestoneEscrow.AlreadyResolvedTrue.selector);
+        escrow.submitAttestation(mLateCorrection, sigLateCorrection);
     }
 
     // ---------------------------------------------------------------------
@@ -738,7 +836,7 @@ contract MilestoneEscrowTest is Test {
 
     function test_Withdraw_RevertsOnZeroAddress() public {
         MilestoneEscrow escrow = _deployDefault();
-        MilestoneEscrow.Attestation memory m = _defaultAttestation(false);
+        MilestoneEscrow.Attestation memory m = _deadlineFalseAttestation();
         bytes memory sig = _signWith(oraclePk, address(escrow), m);
         escrow.submitAttestation(m, sig);
 
@@ -809,7 +907,7 @@ contract MilestoneEscrowTest is Test {
 
     function test_Reclaim_RevertsAfterAlreadyRefundedByFalseAnswer() public {
         MilestoneEscrow escrow = _deployDefault();
-        MilestoneEscrow.Attestation memory m = _defaultAttestation(false);
+        MilestoneEscrow.Attestation memory m = _deadlineFalseAttestation();
         bytes memory sig = _signWith(oraclePk, address(escrow), m);
         escrow.submitAttestation(m, sig);
 
@@ -850,7 +948,7 @@ contract MilestoneEscrowTest is Test {
 
     function test_Invariant_FundsOnlyReachPayerViaFalseOrReclaim() public {
         MilestoneEscrow escrowFalse = _deployDefault();
-        MilestoneEscrow.Attestation memory mFalse = _defaultAttestation(false);
+        MilestoneEscrow.Attestation memory mFalse = _deadlineFalseAttestation();
         bytes memory sigFalse = _signWith(oraclePk, address(escrowFalse), mFalse);
         escrowFalse.submitAttestation(mFalse, sigFalse);
         assertEq(escrowFalse.owed(payer), AMOUNT);

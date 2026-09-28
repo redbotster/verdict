@@ -2,10 +2,9 @@
 
 **Date**: 2026-09-28 · **Contract**: `contracts/src/MilestoneEscrow.sol` (36/36 Foundry tests passing before this audit)
 
-**Fix status (2026-09-28, same day)**: H1, H2, and H3 have been fixed and are covered by new tests
-(42/42 passing). See "Fixes applied" at the end of this file for exactly what changed and what's
-still open. M1, M2, M3, and all Low/Info findings are **not yet fixed** — only the three High
-findings were addressed in this pass.
+**Fix status (2026-09-28, same day)**: all 3 High and all 3 Medium findings are now fixed, covered by
+new tests (48/48 passing, up from 36/36 at audit time). See "Fixes applied" at the end of this file
+for exactly what changed. All Low/Info findings are **not yet fixed**.
 **Method**: [ethskills.com](https://ethskills.com)'s `/audit` skill, routing to the
 [austintgriffith/evm-audit-skills](https://github.com/austintgriffith/evm-audit-skills) checklist set.
 Six parallel Opus sub-agents, one per checklist (`general`, `precision-math`, `erc20`, `signatures`,
@@ -156,7 +155,39 @@ Tests: `test_Withdraw_CanRedirectToADifferentAddress`, `test_Withdraw_RevertsWhe
 to check `owed(...)` and then `withdraw()` rather than asserting an immediate balance change.
 
 ### What this does and doesn't fix
-Fixing H3 (pull payments) incidentally also resolves **M3** (fee-recipient failure no longer blocks
-the payee — they're independent `owed` entries now). **M1** (no deadline binding on attestations) and
-**M2** (challenge window has no actual challenge mechanism) are unrelated to these three fixes and are
-still open, as are all Low/Info findings. See the Medium/Low sections above for those.
+Fixing H3 (pull payments) incidentally also resolved **M3** (fee-recipient failure no longer blocks
+the payee — they're independent `owed` entries now). **M1** and **M2** are fixed below. All Low/Info
+findings are still open.
+
+## Medium fixes applied (2026-09-28)
+
+### M1 — `submitAttestation` is now bound to the escrow's deadline, with freshness ordering
+Three checks added, in this order: `BadIssuedAt` rejects an attestation dated in the future;
+`StaleAttestation` rejects one whose `issuedAt` isn't strictly newer than the last accepted one
+(tracked in a new `lastIssuedAt`); `TooLate` rejects anything submitted after `deadline + grace`
+(closing the race with `reclaim()`); `PrematureFalse` rejects a `false` answer issued before the
+deadline (closing the early-drain path). Together these remove the "first attestation submitted
+wins regardless of correctness" behavior the audit found, and the "either side can win a mempool
+race after `deadline + grace`" behavior. Deliberately did **not** add an `issuedAt >= deadline`
+requirement to `true` answers — the spec's honest flow already has the resolver act at the deadline,
+and gating `true` the same way `false` is gated would need the same treatment for the edge case where
+IMD backfills an answer slightly early; left as a documented non-requirement rather than guessed at.
+Tests: `test_SubmitAttestation_RevertsOnPrematureFalse`, `test_SubmitAttestation_RevertsOnTooLate`,
+`test_SubmitAttestation_RevertsOnFutureIssuedAt`, `test_SubmitAttestation_RevertsOnStaleOverrideAttempt`.
+
+### M2 — the challenge window now has an actual challenge mechanism
+While `trueAt != 0` and still inside `challengeWindow`, a **fresher, oracle-signed `false`** for the
+same escrow now overrides the `true` and settles the deal as `Refunded` instead of being blocked
+outright. A second `true`, or any attestation once the window has closed, still cannot change a
+resolved `true` — `release()` remains the only way forward at that point, matching the original
+design. This directly implements what the spec claims ("the challenge window... gives both sides
+time to object to a result before money moves"): objecting means getting the oracle to issue and
+relay a corrected `false` before the window closes, not a unilateral on-chain veto. That's a real,
+narrower dispute right than "either party can freeze it," and still depends on the oracle's
+willingness to issue a correction — worth being explicit about in customer-facing docs. `AC-4`'s
+underlying concern (single immutable oracle signer, no rotation) is unrelated to this fix and is
+still an open, disclosed trust assumption.
+Tests: `test_SubmitAttestation_FalseOverridesTrueWithinChallengeWindow`,
+`test_SubmitAttestation_RevertsOnFalseAfterChallengeWindowCloses`,
+`test_SubmitAttestation_RevertsOnStaleOverrideAttempt` (shared with M1 — a stale override attempt is
+rejected by the same freshness check either way).

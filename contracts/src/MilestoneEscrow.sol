@@ -53,9 +53,11 @@ contract MilestoneEscrow is EIP712 {
 
     State public state;
     uint256 public trueAt;
+    uint64 public lastIssuedAt;
     mapping(address => uint256) public owed;
 
     event TrueAttested(uint256 indexed requestId, uint256 trueAt);
+    event TrueOverridden(uint256 requestId, uint256 trueAt);
     event Released(uint256 payeeAmount, uint256 feeAmount);
     event Refunded(uint256 amount);
     event Withdrawn(address indexed account, address indexed to, uint256 amount);
@@ -77,6 +79,10 @@ contract MilestoneEscrow is EIP712 {
     error InvalidPayerAuthorization();
     error UnsupportedToken();
     error NothingOwed();
+    error BadIssuedAt();
+    error StaleAttestation();
+    error TooLate();
+    error PrematureFalse();
 
     bytes32 private constant TERMS_TYPEHASH = keccak256(
         "EscrowTerms(address payer,address payee,address token,uint256 amount,uint64 deadline,uint64 grace,bytes32 questionHash,address oracleSigner,address feeRecipient,uint16 feeBps,uint64 challengeWindow)"
@@ -148,22 +154,40 @@ contract MilestoneEscrow is EIP712 {
         if (_token.balanceOf(address(this)) - balanceBefore != _amount) revert UnsupportedToken();
     }
 
+    // A true answer is not final the instant it lands: while still inside `challengeWindow`, a newer,
+    // oracle-signed `false` can still override it (this is what "challenge window" actually means here).
+    // A second `true`, or any attestation once the window has closed, cannot change a resolved true.
     function submitAttestation(Attestation calldata m, bytes calldata sig) external {
         if (state != State.Funded) revert NotFunded();
-        if (trueAt != 0) revert AlreadyResolvedTrue();
+        if (trueAt != 0) {
+            if (m.answer) revert AlreadyResolvedTrue();
+            if (block.timestamp >= trueAt + challengeWindow) revert AlreadyResolvedTrue();
+        }
         if (m.chainId != block.chainid) revert BadChainId();
         if (m.questionHash != questionHash) revert BadQuestionHash();
         if (keccak256(bytes(m.answerType)) != keccak256(bytes("bool"))) revert BadAnswerType();
         if (block.timestamp > m.expiresAt) revert Expired();
+        if (m.issuedAt > block.timestamp) revert BadIssuedAt();
+        // rejects any answer older than (or equal to) the one already accepted, so a stale or replayed
+        // attestation can never undo a fresher one, in either direction
+        if (m.issuedAt <= lastIssuedAt) revert StaleAttestation();
+        // once the payer's reclaim() window is live, submitAttestation can no longer race it
+        if (block.timestamp > uint256(deadline) + uint256(grace)) revert TooLate();
+        // "not done as of an early check" is not proof of failure — only a false evaluated at or after
+        // the deadline can settle the deal; an earlier one would end it before the payee had their full window
+        if (!m.answer && m.issuedAt < deadline) revert PrematureFalse();
 
         bytes32 digest = _hashTypedDataV4(_hashAttestation(m));
         address signer = ECDSA.recover(digest, sig);
         if (signer != oracleSigner) revert BadSigner();
 
+        lastIssuedAt = m.issuedAt;
+
         if (m.answer) {
             trueAt = block.timestamp;
             emit TrueAttested(m.requestId, trueAt);
         } else {
+            if (trueAt != 0) emit TrueOverridden(m.requestId, trueAt);
             state = State.Refunded;
             emit Refunded(amount);
             owed[payer] += amount;
