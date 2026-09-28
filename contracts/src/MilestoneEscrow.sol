@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// Oracle-settled escrow between a payer and a payee, resolved by a signed IMD OracleAttestation.
 contract MilestoneEscrow is EIP712 {
@@ -38,6 +39,8 @@ contract MilestoneEscrow is EIP712 {
 
     uint16 public constant MAX_FEE_BPS = 200;
     uint16 public constant BPS_DENOMINATOR = 10000;
+    uint64 public constant MAX_GRACE = 365 days;
+    uint64 public constant MAX_CHALLENGE_WINDOW = 30 days;
 
     address public immutable payer;
     address public immutable payee;
@@ -46,6 +49,8 @@ contract MilestoneEscrow is EIP712 {
     uint64 public immutable deadline;
     uint64 public immutable grace;
     bytes32 public immutable questionHash;
+    // single point of trust by design, with no rotation path — a compromised or retired key
+    // resolves every escrow it's bound to in the payer's favor; see SPEC.md's risk register
     address public immutable oracleSigner;
     address public immutable feeRecipient;
     uint16 public immutable feeBps;
@@ -83,6 +88,10 @@ contract MilestoneEscrow is EIP712 {
     error StaleAttestation();
     error TooLate();
     error PrematureFalse();
+    error BadDeadline();
+    error BadGrace();
+    error BadChallengeWindow();
+    error BadRecipient();
 
     bytes32 private constant TERMS_TYPEHASH = keccak256(
         "EscrowTerms(address payer,address payee,address token,uint256 amount,uint64 deadline,uint64 grace,bytes32 questionHash,address oracleSigner,address feeRecipient,uint16 feeBps,uint64 challengeWindow)"
@@ -115,6 +124,13 @@ contract MilestoneEscrow is EIP712 {
         if (address(_token) == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
+        if (_deadline <= block.timestamp) revert BadDeadline();
+        if (_grace > MAX_GRACE) revert BadGrace();
+        if (_challengeWindow > MAX_CHALLENGE_WINDOW) revert BadChallengeWindow();
+        if (
+            _payee == address(_token) || _payer == address(_token) || _feeRecipient == address(_token)
+                || _payee == address(this) || _payer == address(this) || _feeRecipient == address(this)
+        ) revert BadRecipient();
 
         bytes32 termsHash = keccak256(
             abi.encode(
@@ -149,6 +165,7 @@ contract MilestoneEscrow is EIP712 {
         challengeWindow = _challengeWindow;
 
         uint256 balanceBefore = _token.balanceOf(address(this));
+        // slither-disable-next-line arbitrary-send-erc20 -- `_payer` authorized this exact transfer above, not just this address
         token.safeTransferFrom(_payer, address(this), _amount);
         // rejects fee-on-transfer, rebasing, or otherwise lossy tokens that would under-fund every payout path
         if (_token.balanceOf(address(this)) - balanceBefore != _amount) revert UnsupportedToken();
@@ -159,10 +176,36 @@ contract MilestoneEscrow is EIP712 {
     // A second `true`, or any attestation once the window has closed, cannot change a resolved true.
     function submitAttestation(Attestation calldata m, bytes calldata sig) external {
         if (state != State.Funded) revert NotFunded();
-        if (trueAt != 0) {
-            if (m.answer) revert AlreadyResolvedTrue();
-            if (block.timestamp >= trueAt + challengeWindow) revert AlreadyResolvedTrue();
+        _checkChallengeable(m.answer);
+        _checkAttestationTiming(m);
+
+        bytes32 digest = _hashTypedDataV4(_hashAttestation(m));
+        address signer = ECDSA.recover(digest, sig);
+        if (signer != oracleSigner) revert BadSigner();
+
+        lastIssuedAt = m.issuedAt;
+
+        if (m.answer) {
+            trueAt = block.timestamp;
+            emit TrueAttested(m.requestId, trueAt);
+        } else {
+            if (trueAt != 0) emit TrueOverridden(m.requestId, trueAt);
+            // pays out the live balance, not the nominal `amount` — any surplus above `amount` (a stray
+            // direct transfer, for example) settles with the payer instead of being stranded forever
+            uint256 bal = token.balanceOf(address(this));
+            state = State.Refunded;
+            emit Refunded(bal);
+            owed[payer] += bal;
         }
+    }
+
+    function _checkChallengeable(bool answer) private view {
+        if (trueAt == 0) return;
+        if (answer) revert AlreadyResolvedTrue();
+        if (block.timestamp >= trueAt + challengeWindow) revert AlreadyResolvedTrue();
+    }
+
+    function _checkAttestationTiming(Attestation calldata m) private view {
         if (m.chainId != block.chainid) revert BadChainId();
         if (m.questionHash != questionHash) revert BadQuestionHash();
         if (keccak256(bytes(m.answerType)) != keccak256(bytes("bool"))) revert BadAnswerType();
@@ -176,22 +219,6 @@ contract MilestoneEscrow is EIP712 {
         // "not done as of an early check" is not proof of failure — only a false evaluated at or after
         // the deadline can settle the deal; an earlier one would end it before the payee had their full window
         if (!m.answer && m.issuedAt < deadline) revert PrematureFalse();
-
-        bytes32 digest = _hashTypedDataV4(_hashAttestation(m));
-        address signer = ECDSA.recover(digest, sig);
-        if (signer != oracleSigner) revert BadSigner();
-
-        lastIssuedAt = m.issuedAt;
-
-        if (m.answer) {
-            trueAt = block.timestamp;
-            emit TrueAttested(m.requestId, trueAt);
-        } else {
-            if (trueAt != 0) emit TrueOverridden(m.requestId, trueAt);
-            state = State.Refunded;
-            emit Refunded(amount);
-            owed[payer] += amount;
-        }
     }
 
     function release() external {
@@ -200,8 +227,11 @@ contract MilestoneEscrow is EIP712 {
         if (state != State.Funded) revert NotFunded();
 
         state = State.Released;
-        uint256 fee = (amount * feeBps) / BPS_DENOMINATOR;
-        uint256 payeeAmount = amount - fee;
+        uint256 bal = token.balanceOf(address(this));
+        // mulDiv over the live balance: never overflows regardless of amount, and captures any surplus above
+        // `amount` instead of stranding it; rounds the fee down, in the payee's favor, which is deliberate
+        uint256 fee = Math.mulDiv(bal, feeBps, BPS_DENOMINATOR);
+        uint256 payeeAmount = bal - fee;
         emit Released(payeeAmount, fee);
         owed[payee] += payeeAmount;
         if (fee > 0) owed[feeRecipient] += fee;
@@ -212,9 +242,10 @@ contract MilestoneEscrow is EIP712 {
         if (state != State.Funded) revert NotFunded();
         if (block.timestamp <= uint256(deadline) + uint256(grace)) revert TooEarly();
 
+        uint256 bal = token.balanceOf(address(this));
         state = State.Refunded;
-        emit Refunded(amount);
-        owed[payer] += amount;
+        emit Refunded(bal);
+        owed[payer] += bal;
     }
 
     // pull payments: a blocklisted or reverting recipient can't lock the other parties' funds, and each

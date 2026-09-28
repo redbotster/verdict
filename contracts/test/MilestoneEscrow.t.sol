@@ -7,6 +7,7 @@ import {MockUSDC} from "./mocks/MockUSDC.sol";
 import {MockFeeOnTransferToken} from "./mocks/MockFeeOnTransferToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MilestoneEscrowTest is Test {
     bytes32 private constant ATTESTATION_TYPEHASH = keccak256(
@@ -319,6 +320,145 @@ contract MilestoneEscrowTest is Test {
             DOMAIN_NAME,
             DOMAIN_VERSION,
             ""
+        );
+    }
+
+    function test_ConstructorRevertsOnPastDeadline() public {
+        token.mint(payer, AMOUNT);
+        address predicted = _predictAddress();
+        vm.prank(payer);
+        token.approve(predicted, AMOUNT);
+
+        vm.warp(1_000_000);
+        vm.expectRevert(MilestoneEscrow.BadDeadline.selector);
+        new MilestoneEscrow(
+            payer,
+            payee,
+            IERC20(address(token)),
+            AMOUNT,
+            uint64(block.timestamp), // not in the future
+            GRACE,
+            questionHash,
+            oracleSigner,
+            feeRecipient,
+            FEE_BPS,
+            CHALLENGE_WINDOW,
+            DOMAIN_NAME,
+            DOMAIN_VERSION,
+            ""
+        );
+    }
+
+    function test_ConstructorRevertsOnExcessiveGrace() public {
+        token.mint(payer, AMOUNT);
+        address predicted = _predictAddress();
+        vm.prank(payer);
+        token.approve(predicted, AMOUNT);
+
+        vm.expectRevert(MilestoneEscrow.BadGrace.selector);
+        new MilestoneEscrow(
+            payer,
+            payee,
+            IERC20(address(token)),
+            AMOUNT,
+            deadline,
+            365 days + 1,
+            questionHash,
+            oracleSigner,
+            feeRecipient,
+            FEE_BPS,
+            CHALLENGE_WINDOW,
+            DOMAIN_NAME,
+            DOMAIN_VERSION,
+            ""
+        );
+    }
+
+    function test_ConstructorRevertsOnExcessiveChallengeWindow() public {
+        token.mint(payer, AMOUNT);
+        address predicted = _predictAddress();
+        vm.prank(payer);
+        token.approve(predicted, AMOUNT);
+
+        vm.expectRevert(MilestoneEscrow.BadChallengeWindow.selector);
+        new MilestoneEscrow(
+            payer,
+            payee,
+            IERC20(address(token)),
+            AMOUNT,
+            deadline,
+            GRACE,
+            questionHash,
+            oracleSigner,
+            feeRecipient,
+            FEE_BPS,
+            30 days + 1,
+            DOMAIN_NAME,
+            DOMAIN_VERSION,
+            ""
+        );
+    }
+
+    function test_ConstructorAcceptsZeroGraceAndChallengeWindow() public {
+        // the spec allows a zero challenge window (and implicitly zero grace) for small deals
+        MilestoneEscrow escrow = _deploy(AMOUNT, deadline, 0, FEE_BPS, 0);
+        assertEq(escrow.grace(), 0);
+        assertEq(escrow.challengeWindow(), 0);
+    }
+
+    function test_ConstructorRevertsWhenPayeeIsTokenAddress() public {
+        token.mint(payer, AMOUNT);
+        address predicted = _predictAddress();
+        vm.prank(payer);
+        token.approve(predicted, AMOUNT);
+        bytes memory auth = _payerAuth(
+            address(token), IERC20(address(token)), AMOUNT, deadline, GRACE, questionHash, oracleSigner, feeRecipient, FEE_BPS, CHALLENGE_WINDOW
+        );
+
+        vm.expectRevert(MilestoneEscrow.BadRecipient.selector);
+        new MilestoneEscrow(
+            payer,
+            address(token),
+            IERC20(address(token)),
+            AMOUNT,
+            deadline,
+            GRACE,
+            questionHash,
+            oracleSigner,
+            feeRecipient,
+            FEE_BPS,
+            CHALLENGE_WINDOW,
+            DOMAIN_NAME,
+            DOMAIN_VERSION,
+            auth
+        );
+    }
+
+    function test_ConstructorRevertsWhenFeeRecipientIsSelfAddress() public {
+        token.mint(payer, AMOUNT);
+        address predicted = _predictAddress();
+        vm.prank(payer);
+        token.approve(predicted, AMOUNT);
+        bytes memory auth = _payerAuth(
+            payee, IERC20(address(token)), AMOUNT, deadline, GRACE, questionHash, oracleSigner, predicted, FEE_BPS, CHALLENGE_WINDOW
+        );
+
+        vm.expectRevert(MilestoneEscrow.BadRecipient.selector);
+        new MilestoneEscrow(
+            payer,
+            payee,
+            IERC20(address(token)),
+            AMOUNT,
+            deadline,
+            GRACE,
+            questionHash,
+            oracleSigner,
+            predicted, // the escrow's own predicted address
+            FEE_BPS,
+            CHALLENGE_WINDOW,
+            DOMAIN_NAME,
+            DOMAIN_VERSION,
+            auth
         );
     }
 
@@ -746,6 +886,45 @@ contract MilestoneEscrowTest is Test {
         assertEq(token.balanceOf(address(escrow)), 0);
     }
 
+    function test_Release_SweepsSurplusFromAStrayDirectTransfer() public {
+        MilestoneEscrow escrow = _deployDefault();
+        MilestoneEscrow.Attestation memory m = _defaultAttestation(true);
+        bytes memory sig = _signWith(oraclePk, address(escrow), m);
+        escrow.submitAttestation(m, sig);
+
+        uint256 surplus = 50e6;
+        token.mint(address(this), surplus);
+        token.transfer(address(escrow), surplus);
+
+        vm.warp(block.timestamp + CHALLENGE_WINDOW);
+        escrow.release();
+
+        uint256 fee = Math.mulDiv(AMOUNT + surplus, FEE_BPS, 10000);
+        assertEq(escrow.owed(payee), AMOUNT + surplus - fee);
+        assertEq(escrow.owed(feeRecipient), fee);
+
+        vm.prank(payee);
+        escrow.withdraw(payee);
+        vm.prank(feeRecipient);
+        escrow.withdraw(feeRecipient);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_Reclaim_SweepsSurplusFromAStrayDirectTransfer() public {
+        MilestoneEscrow escrow = _deployDefault();
+        uint256 surplus = 50e6;
+        token.mint(address(this), surplus);
+        token.transfer(address(escrow), surplus);
+
+        vm.warp(uint256(deadline) + uint256(GRACE) + 1);
+        escrow.reclaim();
+
+        assertEq(escrow.owed(payer), AMOUNT + surplus);
+        vm.prank(payer);
+        escrow.withdraw(payer);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
     function testFuzz_Release_ChallengeWindowBoundary(uint256 offset) public {
         MilestoneEscrow escrow = _deployDefault();
         MilestoneEscrow.Attestation memory m = _defaultAttestation(true);
@@ -947,7 +1126,10 @@ contract MilestoneEscrowTest is Test {
     }
 
     function test_Invariant_FundsOnlyReachPayerViaFalseOrReclaim() public {
+        // both escrows must be deployed before any warping, since the constructor requires a future deadline
         MilestoneEscrow escrowFalse = _deployDefault();
+        MilestoneEscrow escrowReclaim = _deploy(AMOUNT, deadline, GRACE, FEE_BPS, CHALLENGE_WINDOW);
+
         MilestoneEscrow.Attestation memory mFalse = _deadlineFalseAttestation();
         bytes memory sigFalse = _signWith(oraclePk, address(escrowFalse), mFalse);
         escrowFalse.submitAttestation(mFalse, sigFalse);
@@ -957,7 +1139,6 @@ contract MilestoneEscrowTest is Test {
         escrowFalse.withdraw(payer);
         assertEq(token.balanceOf(payer), AMOUNT);
 
-        MilestoneEscrow escrowReclaim = _deploy(AMOUNT, deadline, GRACE, FEE_BPS, CHALLENGE_WINDOW);
         vm.warp(uint256(deadline) + uint256(GRACE) + 1);
         escrowReclaim.reclaim();
         assertEq(escrowReclaim.owed(payer), AMOUNT);

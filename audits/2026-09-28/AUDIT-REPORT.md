@@ -2,9 +2,10 @@
 
 **Date**: 2026-09-28 · **Contract**: `contracts/src/MilestoneEscrow.sol` (36/36 Foundry tests passing before this audit)
 
-**Fix status (2026-09-28, same day)**: all 3 High and all 3 Medium findings are now fixed, covered by
-new tests (48/48 passing, up from 36/36 at audit time). See "Fixes applied" at the end of this file
-for exactly what changed. All Low/Info findings are **not yet fixed**.
+**Fix status (2026-09-28, same day)**: all 3 High, all 3 Medium, all 5 Low, and the 1 Info finding are
+now fixed, covered by new tests (56/56 passing, up from 36/36 at audit time). A [Slither](https://github.com/crytic/slither)
+static-analysis pass was also run as a second, independent check beyond the LLM-based checklist audit
+— see "Slither pass" at the end of this file. See "Fixes applied" for exactly what changed.
 **Method**: [ethskills.com](https://ethskills.com)'s `/audit` skill, routing to the
 [austintgriffith/evm-audit-skills](https://github.com/austintgriffith/evm-audit-skills) checklist set.
 Six parallel Opus sub-agents, one per checklist (`general`, `precision-math`, `erc20`, `signatures`,
@@ -191,3 +192,73 @@ Tests: `test_SubmitAttestation_FalseOverridesTrueWithinChallengeWindow`,
 `test_SubmitAttestation_RevertsOnFalseAfterChallengeWindowCloses`,
 `test_SubmitAttestation_RevertsOnStaleOverrideAttempt` (shared with M1 — a stale override attempt is
 rejected by the same freshness check either way).
+
+## Low + Info fixes applied (2026-09-28)
+
+### L1 — constructor now rejects nonsensical timing parameters
+Added `BadDeadline` (deadline must be in the future at deploy time), `BadGrace` (capped at a new
+`MAX_GRACE = 365 days`), and `BadChallengeWindow` (capped at a new `MAX_CHALLENGE_WINDOW = 30 days`).
+Zero `grace` and zero `challengeWindow` remain explicitly valid — the spec calls for "zero for small
+deals," so this only bounds the extremes, not the low end.
+Tests: `test_ConstructorRevertsOnPastDeadline`, `test_ConstructorRevertsOnExcessiveGrace`,
+`test_ConstructorRevertsOnExcessiveChallengeWindow`, `test_ConstructorAcceptsZeroGraceAndChallengeWindow`.
+
+### L2 — settlement now sweeps any surplus instead of stranding it
+`release()`, `reclaim()`, and the false-attestation path now compute payouts from the **live**
+`token.balanceOf(address(this))` instead of the immutable `amount`. Since H2 already guarantees the
+contract receives exactly `amount` at construction, live balance only ever differs from `amount` if
+something is added afterward (a stray direct transfer, for example) — and now that surplus flows to
+whichever party the settlement direction already favors, instead of being permanently stuck.
+Tests: `test_Release_SweepsSurplusFromAStrayDirectTransfer`, `test_Reclaim_SweepsSurplusFromAStrayDirectTransfer`.
+
+### L3 — constructor now rejects the token address or the escrow's own address as a recipient
+Added `BadRecipient`, reverting if `payee`, `payer`, or `feeRecipient` equals `address(token)` or
+`address(this)`. Cheap guard against a misconfigured deploy (the deal terms come from a plain-English
+compiler pipeline, so a validation layer bug upstream could otherwise produce one of these).
+Tests: `test_ConstructorRevertsWhenPayeeIsTokenAddress`, `test_ConstructorRevertsWhenFeeRecipientIsSelfAddress`.
+
+### L4 — fee calculation can no longer overflow at any token amount
+Replaced `(bal * feeBps) / BPS_DENOMINATOR` with OpenZeppelin's `Math.mulDiv(bal, feeBps, BPS_DENOMINATOR)`,
+which computes the full-precision intermediate product and can't overflow regardless of `bal`. This was
+already low-severity (needed a ~1e74-magnitude token supply to trigger) and is now closed outright
+rather than just documented. Folded into the same lines touched by L2's live-balance change.
+
+### I1 — fee-rounding direction is now documented in the code, not just implied
+Added a one-line comment on the `Math.mulDiv` call in `release()` noting the fee rounds down, in the
+payee's favor, and that this is deliberate rather than an oversight.
+
+### L5 — single oracle signer: disclosed in-code, not code-fixed
+This finding's own recommendation frames it as a disclosure issue, not a bug ("this is a trust issue
+that comes with the design ... it should be disclosed"). Added a comment directly on the `oracleSigner`
+immutable declaration stating the trust assumption (no rotation path; a compromised or retired key
+resolves every bound escrow in the payer's favor), so it's visible to anyone reading the contract, not
+only the separate spec doc. Did not implement multi-signer support — the finding itself calls that
+optional, contingent on IMD publishing a key-rotation scheme that doesn't exist yet.
+
+## Slither pass (2026-09-28)
+
+Ran [Slither](https://github.com/crytic/slither) 0.11.6 as a second, independent check beyond the
+LLM-based checklist audit above — static analysis catches a different class of issues (mechanical
+pattern-matching over the AST/CFG) than an LLM walking a checklist does.
+
+**Before the Low fixes**, Slither found 6 issues, all either already mitigated or inherent to the
+design:
+- `arbitrary-send-erc20` on the constructor's `transferFrom(_payer, ...)` — this is exactly what H1's
+  payer-authorization signature already addresses; Slither can't see the off-chain signature check,
+  so it flags the raw pattern. Suppressed with a `slither-disable-next-line` comment explaining why.
+- `incorrect-equality` (`trueAt == 0`) and `timestamp` (multiple deadline/window comparisons) — these
+  are Slither's generic "miners can shift `block.timestamp` by a few seconds" and "exact-zero checks
+  can be risky" warnings. Neither applies meaningfully here: `trueAt` is only ever set by the contract
+  itself, never influenced by external input, and every timing window in this contract is measured in
+  hours-to-days, not seconds. Left as-is; reviewed and accepted rather than suppressed, since these
+  detectors are worth keeping live for any future change that might actually introduce a timing bug.
+- `cyclomatic-complexity` on `submitAttestation` (score 16, "high") — a legitimate readability signal
+  after the M1/M2 checks accumulated in one function. **Fixed**: split into `_checkChallengeable` and
+  `_checkAttestationTiming`, two small private view functions, with no behavior change (56/56 tests
+  still pass). This is arguably a security fix too — the M1/M2 logic is now easier for a human or a
+  future auditor to actually verify at a glance.
+
+**After the fixes**, Slither finds 9 results, all `incorrect-equality`/`timestamp` on the same accepted
+pattern (now spread across the two new smaller functions plus `withdraw`'s `amt == 0` check, which is
+the same safe pattern — `amt` is read from the contract's own `owed` mapping, not external input).
+No `arbitrary-send-erc20` and no `cyclomatic-complexity` remain.
