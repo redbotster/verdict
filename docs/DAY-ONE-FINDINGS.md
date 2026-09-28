@@ -76,6 +76,29 @@ how to retrieve and answer those recheck questions (a follow-up field on the sam
 separate endpoint?) — not resolved by the public OpenAPI spec alone. Needs either IMD's fuller docs
 or a support conversation.
 
+## 5. `questionHash` does NOT depend on `consumer` — and addresses must be lowercase
+
+Built while implementing `server/oracle-compiler` (2026-09-28). Two follow-ups to finding #2 above:
+
+- **`consumer` (both `chainId` and `verifyingContract`) has no effect on `questionHash`.** Confirmed by
+  sending two otherwise-identical `oracle.request` quotes moments apart, differing only in
+  `consumer.verifyingContract` — identical `questionHash` both times. This means a compile-time dry-run
+  quote (using any placeholder consumer, since the escrow doesn't exist yet) already produces the real,
+  binding `questionHash` — there's no need for a separate "final" quote once the escrow is deployed just
+  to get a different hash. `server/oracle-compiler`'s `pinQuestion()` still exists to register the real
+  deployed address with IMD before the resolver's real paid call, but that's bookkeeping on IMD's side,
+  not a correctness requirement for the escrow contract. (An earlier version of this doc and of the
+  compiler's code assumed the opposite — corrected here.)
+- **IMD's schema requires lowercase hex addresses**, confirmed via a direct 400 on
+  `consumer.verifyingContract: "0x0000000000000000000000000000000000dEaD"` (mixed case) that a
+  lowercased identical address doesn't trigger. A checksummed address (the normal, EIP-55 output of
+  most wallet libraries) will silently fail with a bare `400 invalid_request` and no detail — worth
+  building `.toLowerCase()` into any code path that accepts an address, since the error message alone
+  gives no hint what's wrong.
+- Also found in the process: the top-level `chainId` field (separate from `consumer.chainId` — it's the
+  chain whose blocks get pinned for the evidence window) is a required field with no default; omitting
+  it also produces the same unhelpful bare `400 invalid_request`.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - The exact EIP-712 `quoteApprovalTypedData` schema (domain/types) IMD expects for the second

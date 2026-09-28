@@ -22,7 +22,11 @@ export function generateClientToken(): string {
 }
 
 export class ImdClient {
-  constructor(private readonly token: string) {}
+  private readonly token: string;
+
+  constructor(token: string) {
+    this.token = token;
+  }
 
   private headers(): Record<string, string> {
     return {

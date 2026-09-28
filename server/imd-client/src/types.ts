@@ -104,11 +104,13 @@ export interface ImdError {
 }
 
 export class ImdApiError extends Error {
-  constructor(
-    public httpStatus: number,
-    public body: ImdError,
-  ) {
+  httpStatus: number;
+  body: ImdError;
+
+  constructor(httpStatus: number, body: ImdError) {
     super(`IMD ${httpStatus}: ${body.error}${body.detail ? ` — ${body.detail}` : ""}`);
     this.name = "ImdApiError";
+    this.httpStatus = httpStatus;
+    this.body = body;
   }
 }
