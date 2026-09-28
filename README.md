@@ -16,7 +16,10 @@ closing note.
   intentionally left unimplemented pending IMD's real signing schema (see findings doc).
 - `server/oracle-compiler/` — the English-deal-to-oracle-question compiler: extract → match a vetted
   template → lint → free dry-run quote. Two of three templates live-verified against `api.imd.fun`.
-- `server/resolver/` — not yet built: the 1Claw-hosted resolver agent.
+- `server/resolver/` — the agent that acts at a deal's deadline: relays the signed attestation and
+  settles the escrow. Chain interaction is real and integration-tested against the actual compiled
+  contract on a local Anvil chain; the IMD payment-signing and oracle-result-fetching steps are
+  stubbed pending the same unconfirmed schemas noted above.
 - `site/` — not yet built: per-deal status page.
 
 ## Status
@@ -47,6 +50,14 @@ the full six-week shape. What exists right now:
   native TypeScript execution only strips types, it doesn't check them, which is how a template
   builder silently omitting the required top-level `chainId` field went undetected until a live
   smoke test caught it as a bare `400` with no detail.
+- `server/resolver/`: on-chain relay (`submitAttestation`/`release`/`reclaim`/`withdraw`) built on
+  viem, reading the ABI straight from the Foundry build artifact so it can't drift from what's
+  actually deployed. A real Anvil integration test deploys the actual compiled contract, signs a real
+  EIP-712 attestation and a real payer-authorization signature, and relays both through this package's
+  own code — full loop: submit → challenge-window elapses → release → payee withdraws. Threshold-based
+  human-approval gating is implemented and tested; the actual IMD payment-signing and
+  oracle-attestation-fetch steps are stubbed (same "don't guess at an unconfirmed schema" pattern as
+  `imd-client`'s `pay()`).
 
 What's deliberately not done yet, because it costs real money or needs information this pass
 couldn't get:
@@ -55,7 +66,7 @@ couldn't get:
 - 1Claw vault/policy/automation wiring (needs the Permit2 signing schema resolved first).
 - Extraction has not been run against a real LLM (no Gateway API key available this pass) — everything
   downstream of it is tested by injecting a fixed extraction directly.
-- The resolver agent and the dual-approval / status page UI.
+- The dual-approval / status page UI (`site/`).
 - Funding the ops wallet.
 
 ## Local setup
