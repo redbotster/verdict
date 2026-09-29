@@ -1214,6 +1214,13 @@ this bug (0.09 remaining, well under the 0.5 a real request costs). Proof 1 abov
 practical substitute: it uses IMD's actual real signature over the actual real message, not a
 simulated one, checked against the actual production hashing code path.
 
+**Deployed the fix to the live webhook.** `site/`'s production Vercel deployment (already activated
+this session, §22's third addendum) was rebuilt and redeployed after this fix landed
+(`vercel deploy --prod`), so the corrected `@verdict/resolver` code — `getRealAttestation()`, the
+fixed `eip712.ts`/`types.ts`/`relay.ts` — is what the live webhook actually runs now, not the pre-fix
+version from the earlier activation deploy. Confirmed healthy post-deploy with a real request against
+a nonexistent deal address (`404`, same check as the activation itself).
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
