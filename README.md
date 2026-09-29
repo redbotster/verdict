@@ -51,6 +51,11 @@ and documented turned out to be wrong: that the toggle was dashboard-only (it's 
 always; the real fix is re-authenticating as the agent after flipping it), and that it needed a paid
 tier upgrade (there's no tier gate at all — that was a bug in 1Claw's own docs, since fixed).
 
+Real deal storage exists too, and it's wired end to end (§21) — a real Supabase table replaces the
+hardcoded placeholder, and `/new` has a real "register the deployed escrow" step: paste an address
+and it reads the real on-chain `questionHash`/`amount`/`feeBps`, refuses anything that doesn't match
+what was actually compiled, and writes the row for the resolver webhook to use later.
+
 ## Layout
 
 | Package | What it does | Status |
@@ -58,9 +63,9 @@ tier upgrade (there's no tier gate at all — that was a bug in 1Claw's own docs
 | `contracts/` | `MilestoneEscrow.sol`, the on-chain escrow | 56/56 tests, audited, live on Base mainnet (demo) |
 | `server/imd-client/` | IMD's paid-request client, all 8 steps | All real, including payment signing |
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
-| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; the typed-data signer adapter is code-complete but unverified (needs a dashboard toggle — see below) |
+| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end, including the typed-data signer adapter — a real signature through 1Claw's Intents API, independently verified |
 | `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing |
-| `site/` | Status page + dual-approval deal creation + resolver webhook | **Deployed for real** at [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app); the webhook is live-verified end to end by a real 1Claw Automation |
+| `site/` | Status page + dual-approval deal creation + registration + resolver webhook | **Deployed for real** at [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 

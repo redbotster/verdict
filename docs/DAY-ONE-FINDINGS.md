@@ -246,6 +246,11 @@ claim made in this doc's earlier (now-superseded) version of §7/§9:
   that is guessed at — `permit2-demo.ts`'s test values are explicitly labeled as plausible-but-
   unconfirmed, not as IMD's real integration.
 
+> **Corrected in §20**: the "one-time manual dashboard action" framing above is wrong. There's no
+> separate dashboard-only gate and no tier requirement — `intents_api_enabled` is the one real flag,
+> and the actual fix is re-authenticating **as the agent** (a fresh `POST /v1/auth/agent-token`
+> exchange) after flipping it, not a dashboard visit. Read §20 before acting on anything above.
+
 ## 11. Acquired real `$IMD` via a hand-rolled Uniswap v4 swap — real transaction, on mainnet
 
 At the user's explicit request (2026-09-29), swapped 0.0015 ETH for `$IMD` directly against the real
