@@ -81,10 +81,9 @@ Each package has its own README with the real depth. This one's just for "does i
   reduce it (pick questions with one unambiguous source URL), not eliminate it.
 - No paid human audit. The Base mainnet demo was one wallet playing every role — proof the contract
   works, not clearance to use it for a real deal.
-- Real deal storage now exists (Supabase, §21), but nothing writes to it yet — `/new` still only
-  produces a signed deployment payload and doesn't deploy anything, so there's no "register this
-  deployed escrow" step calling `createDeal()` for real. The two demo entries still work via the
-  local-only file, as before.
+- `/new` still doesn't deploy anything itself — it produces a signed deployment payload, and a
+  separate "register the deployed escrow" step (real, live-verified, §21) writes it to Supabase once
+  you've actually deployed it elsewhere with that payload.
 
 ## Ops wallet
 

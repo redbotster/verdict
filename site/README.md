@@ -61,9 +61,14 @@ and both are server-only.
   still layers local-only entries on top for local dev — a local Anvil demo, ephemeral by nature, so
   it's never written into the persistent table.
 
-  Nothing writes to `deals` yet from the UI — `createDeal()` exists for a future "register this
-  deployed escrow" step, since `/new` still only produces a signed deployment payload and doesn't
-  deploy anything (see "What this doesn't do" below).
+  `/new`'s "Register the deployed escrow" step writes to it for real: paste the address you deployed
+  with the "done" step's payload, and `registerDeal()` (`app/new/actions.ts`) reads its real on-chain
+  `questionHash`/`amount`/`feeBps`, refuses to save anything whose on-chain `questionHash` doesn't
+  match what was actually compiled, computes the fee-adjusted payout estimate with the same math as
+  `MilestoneEscrow.sol` itself, and writes the row. `/new` still doesn't deploy anything itself (see
+  "What this doesn't do" below) — this step only registers something already deployed elsewhere.
+  Live-verified end to end with `scripts/register-deal-demo.ts` — see
+  `docs/DAY-ONE-FINDINGS.md` §21.
 
 ## Demo deal, for local development
 

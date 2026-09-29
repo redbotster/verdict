@@ -3,7 +3,7 @@
 // local development. Requires `forge build` to have run in contracts/. Leaves Anvil running in the
 // background afterward — kill it with the PID this script prints when you're done.
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,7 +143,13 @@ async function main() {
   const releaseHash = await walletFor(deployer).writeContract({ address: escrowAddress, abi: escrowArtifact.abi, functionName: "release", args: [] });
   await publicClient.waitForTransactionReceipt({ hash: releaseHash });
 
+  const outPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../lib/demo-deal.local.json");
+  // Merge, don't overwrite — this file can carry other entries too (e.g. the real Base mainnet demo
+  // from docs/DAY-ONE-FINDINGS.md §12), and a previous run unconditionally clobbering them was a
+  // real, if minor, footgun.
+  const existing = existsSync(outPath) ? JSON.parse(readFileSync(outPath, "utf-8")) : {};
   const demoDeal = {
+    ...existing,
     [escrowAddress.toLowerCase()]: {
       title: `${REPO} release bounty`,
       rpcUrl: RPC_URL,
@@ -154,7 +160,6 @@ async function main() {
       quorum: 4,
     },
   };
-  const outPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../lib/demo-deal.local.json");
   writeFileSync(outPath, JSON.stringify(demoDeal, null, 2));
 
   console.log(`\nDemo deal deployed and released: ${escrowAddress}`);

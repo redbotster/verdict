@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createWalletClient, custom, type Address } from "viem";
-import { compileReleaseDeal, type CompileFormInput } from "./actions";
+import { compileReleaseDeal, registerDeal, type CompileFormInput } from "./actions";
 import { computeTermsHash } from "@/lib/terms";
 import type { OracleRequestInput } from "@verdict/oracle-compiler";
 
@@ -55,6 +55,12 @@ export function NewDealForm() {
   const [payerAuthorization, setPayerAuthorization] = useState<`0x${string}` | null>(null);
   const [payeeAcknowledgment, setPayeeAcknowledgment] = useState<`0x${string}` | null>(null);
   const [deadlineSeconds, setDeadlineSeconds] = useState<bigint>(0n);
+
+  const [deployedAddress, setDeployedAddress] = useState("");
+  const [rpcUrl, setRpcUrl] = useState("");
+  const [chainId, setChainId] = useState("1");
+  const [registerStatus, setRegisterStatus] = useState<"idle" | "pending" | "done">("idle");
+  const [registerError, setRegisterError] = useState<string | null>(null);
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -127,6 +133,26 @@ export function NewDealForm() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  async function handleRegister() {
+    if (!compiled) return;
+    setRegisterStatus("pending");
+    setRegisterError(null);
+    const result = await registerDeal({
+      escrowAddress: deployedAddress,
+      chainId: Number(chainId),
+      rpcUrl,
+      githubRepo: form.githubRepo,
+      input: compiled.input,
+      questionHash: compiled.questionHash,
+    });
+    if (!result.ok) {
+      setRegisterStatus("idle");
+      setRegisterError(result.error);
+      return;
+    }
+    setRegisterStatus("done");
   }
 
   return (
@@ -245,6 +271,43 @@ export function NewDealForm() {
               2,
             )}
           </pre>
+        </div>
+      )}
+
+      {step === "done" && compiled && registerStatus !== "done" && (
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Register the deployed escrow</h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Once the payload above has actually been deployed, paste the resulting address here. This reads its real on-chain state and refuses to save anything whose
+            questionHash doesn&apos;t match what was compiled.
+          </p>
+          {registerError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">{registerError}</div>}
+          <Field label="Deployed escrow address">
+            <input className={inputClass} placeholder="0x…" value={deployedAddress} onChange={(e) => setDeployedAddress(e.target.value)} />
+          </Field>
+          <Field label="RPC URL" hint="must be reachable from this server, not just your browser">
+            <input className={inputClass} placeholder="https://…" value={rpcUrl} onChange={(e) => setRpcUrl(e.target.value)} />
+          </Field>
+          <Field label="Chain ID">
+            <input type="number" className={inputClass} value={chainId} onChange={(e) => setChainId(e.target.value)} />
+          </Field>
+          <button
+            disabled={registerStatus === "pending" || !deployedAddress || !rpcUrl}
+            onClick={handleRegister}
+            className="self-start rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          >
+            {registerStatus === "pending" ? "Reading on-chain state & saving…" : "Register deal"}
+          </button>
+        </div>
+      )}
+
+      {registerStatus === "done" && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+          Registered. View it at{" "}
+          <a href={`/deals/${deployedAddress}`} className="underline">
+            /deals/{deployedAddress}
+          </a>
+          .
         </div>
       )}
     </div>

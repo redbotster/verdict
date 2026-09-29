@@ -827,6 +827,25 @@ the Base mainnet one (§12) is already settled (`Released`) with nothing left to
 continue to work exactly as before via the local-file path, which `getDealMetadata`/`listDeals`
 still check first.
 
+**Addendum — the write path is wired up too.** `createDeal()` is no longer unused: `/new`'s
+"done" step (a real deployment payload, still not deployed by the app itself) now has a follow-up
+"Register the deployed escrow" step. The user pastes the address they deployed with that payload;
+`registerDeal()` (`app/new/actions.ts`) reads the real on-chain `questionHash`/`amount`/`feeBps`
+first and refuses to save anything whose on-chain `questionHash` doesn't match what was actually
+compiled — it never trusts a pasted address at face value. `payoutEstimateBaseUnits` is computed
+with the exact same fee math as `MilestoneEscrow.sol` itself (`amount - (amount * feeBps) / 10000`,
+floor division, matching `Math.mulDiv`), not the gross amount.
+
+Live-verified end to end with `site/scripts/register-deal-demo.ts`: a real IMD quote, a real
+`MilestoneEscrow` deployed to a throwaway local Anvil chain bound to that exact `questionHash`, a
+real on-chain read confirming the hash match, correct fee math (1000 USDC at 100 bps → 990 USDC
+payout estimate), a real row written to Supabase, and a readback confirming it — cleaned up after
+itself. (The script itself couldn't import `app/new/actions.ts` or `lib/escrow.ts` directly — both
+use either Next's `@/` path alias or an extensionless relative import, neither of which plain Node
+resolves outside Next's bundler, the same documented limitation `server/resolver/scripts/e2e-demo.ts`
+already works around for `lib/escrow.ts` — so the script inlines the two on-chain reads and calls
+`createDeal()` directly instead, exercising the same real logic and the same real dependencies.)
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
