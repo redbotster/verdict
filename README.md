@@ -75,18 +75,22 @@ the full six-week shape. What exists right now:
   through the live IMD API, deploys the real contract bound to the real resulting `questionHash`, and
   runs it through `resolveDeal()`'s real relay/settle logic — proving compile → deploy → resolve
   actually composes, with only the paid oracle-attestation step faked (see above).
-- CI (`.github/workflows/ci.yml`): `forge test` for the contracts, `tsc --noEmit` + `node --test` for
-  each server package, lint + a full `next build` for the site. Verifying this caught two real bugs,
-  neither of which a local "fresh clone" dry run actually caught, because that dry run reused one
-  clone across every job — real CI isolates each job's checkout completely, which is exactly what
-  exposed both: (1) a bare `tsc --noEmit` on `site/` fails on a first-time checkout, since Next only
+- CI (`.github/workflows/ci.yml`), green: `forge test` for the contracts, `tsc --noEmit` +
+  `node --test` for each server package, lint + a full `next build` for the site. Getting there
+  caught three real bugs, none of which a local "fresh clone" dry run had caught, because that dry
+  run reused one clone across every job and ran everything on an already-warm local machine — real
+  CI isolates each job's checkout completely and has different timing, which is exactly what exposed
+  all three: (1) a bare `tsc --noEmit` on `site/` fails on a first-time checkout, since Next only
   generates its ambient types (`LayoutProps`, etc.) during a build or dev run — `next build`'s
   internal check covers it instead; (2) `resolver`'s typecheck needs `oracle-compiler`'s
   `node_modules` installed too, because `scripts/e2e-demo.ts` (in the typecheck scope) imports
-  `compile.ts`, which pulls in `extract.ts`'s `ai`/`zod` deps — even though `resolve.ts` itself and
-  the test suite only use type-only imports from `oracle-compiler` and never need that install. Both
-  only surfaced by actually watching the real run on GitHub (`gh run watch`) rather than trusting a
-  local approximation of it.
+  `compile.ts`, which pulls in `extract.ts`'s `ai`/`zod` deps, even though `resolve.ts` itself and
+  the test suite only use type-only imports from `oracle-compiler`; (3) a genuine TOCTOU race in
+  every "deploy a token, mint, predict the escrow's CREATE address" script — `mint` and `approve`
+  were awaited only for submission, not mining, before something depended on them having happened.
+  Anvil auto-mines fast enough that this never once surfaced in dozens of local runs; a loaded CI
+  runner's different timing hit it on the very first real run. All three only surfaced by actually
+  watching the real run on GitHub (`gh run watch`) rather than trusting a local approximation of it.
 
 What's deliberately not done yet, because it costs real money or needs information this pass
 couldn't get:
