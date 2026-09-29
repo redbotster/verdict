@@ -106,11 +106,13 @@ Each package has its own README with the real depth. This one's just for "does i
   reduce it (pick questions with one unambiguous source URL), not eliminate it.
 - No paid human audit. The Base mainnet demo was one wallet playing every role — proof the contract
   works, not clearance to use it for a real deal.
-- `/new` can now deploy the escrow itself (the payer's wallet approves + deploys), but only the
-  underlying mechanism is proven so far — against a local Anvil chain with the identical code path
-  (`site/scripts/deploy-self-service-test.ts`), not yet a real click-through with an actual wallet
-  extension in a real browser against a real chain. Deploying elsewhere and pasting the address into
-  the "register the deployed escrow" step (real, live-verified, §21) still works as before.
+- `/new` can now deploy the escrow itself (the payer's wallet approves + deploys) — proven both at the
+  mechanism level (local Anvil, `site/scripts/deploy-self-service-test.ts`) and with a real browser
+  click-through of the actual UI (a real dev server, a real page, an injected `window.ethereum`
+  forwarding to real signing, driven through the actual React click handlers — see §23's addendum).
+  Only remaining gap: a real MetaMask-style extension's own confirmation-popup UX hasn't been
+  exercised. Deploying elsewhere and pasting the address into the "register the deployed escrow" step
+  (real, live-verified, §21) still works as before.
 - No real human-approval gate for above-threshold payouts (§24). Two real bugs in this area are now
   fixed — `resolveDeal()` no longer re-spends real `$IMD` on a retry, and an above-threshold deal no
   longer hard-fails the whole resolution — but an actual 1Claw-backed approval flow (async, since
@@ -169,5 +171,5 @@ order it was found:
 | 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |
 | 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |
 | 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet; now activated on the live resolver webhook |
-| 23 | `/new` can now actually deploy the escrow (payer approves + deploys); mechanism proven on local Anvil, not yet a real browser click-through |
+| 23 | `/new` can now actually deploy the escrow (payer approves + deploys); proven on local Anvil, then proven again with a real browser click-through of the actual UI |
 | 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |

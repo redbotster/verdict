@@ -21,9 +21,11 @@ escrow balance, question text and status." Next.js App Router, read-only, server
   funds in immediately via its constructor — the same approve-then-deploy sequence as
   `scripts/deploy-demo.ts`, just with the payer as both approver and deployer instead of a separate
   deployer account. `scripts/deploy-self-service-test.ts` proves this exact sequence (same
-  `lib/artifact.ts` loaders, same nonce-prediction math) against a local Anvil chain — a real deploy,
-  not a browser click-through, since that needs an actual wallet extension to drive. Deploying is
-  optional: paste an address deployed elsewhere directly into the "register" step instead.
+  `lib/artifact.ts` loaders, same nonce-prediction math) against a local Anvil chain, and it's also
+  been proven with a real click-through of the actual UI — a real dev server, a real page, an injected
+  `window.ethereum` forwarding to real signing, driven through the real React click handlers, not a
+  script calling viem directly (see `docs/DAY-ONE-FINDINGS.md` §23's addendum). Deploying is optional:
+  paste an address deployed elsewhere directly into the "register" step instead.
 - `/api/resolve/[address]` — the webhook a 1Claw Automation calls at a deal's deadline; looks the
   deal up in Supabase by address and runs `resolveDeal()` server-side, preferring a 1Claw-backed
   signer over a raw `EVM_PRIVATE_KEY` when configured (§22). Guarded by a shared secret
@@ -131,11 +133,12 @@ secret). Getting it actually working (not just a green build) needed several thi
 
 `/deals/[address]` is read-only by design — submitting an attestation, calling `release()`/
 `reclaim()`, or withdrawing happens through `server/resolver` or directly on-chain, not from a form
-here. `/new` can now deploy the escrow itself (see above), but this has only been proven against a
-local Anvil chain with the exact same code path (`scripts/deploy-self-service-test.ts`) — not yet
-clicked through in a real browser with a real wallet extension against a real chain, which is the only
-way to fully confirm the UI wiring itself (as opposed to the underlying viem calls) works end to end.
-Its `oracleSigner` field is still a form input the operator must fill in correctly — IMD's real
+here. `/new` can now deploy the escrow itself (see above), proven both at the mechanism level (local
+Anvil, `scripts/deploy-self-service-test.ts`) and with a real click-through of the actual UI (real dev
+server, real page, an injected `window.ethereum`, driven through the real React click handlers — see
+`docs/DAY-ONE-FINDINGS.md` §23's addendum). The one remaining gap is a real MetaMask-style extension's
+own confirmation-popup UX, which this doesn't exercise. Its `oracleSigner` field is still a form input
+the operator must fill in correctly — IMD's real
 attestation signer address has never been confirmed (see `docs/DAY-ONE-FINDINGS.md`), so there's
 nothing to default it to yet. Wallet interaction is a raw EIP-1193 `window.ethereum` call via viem's
 `custom` transport, not a full wallet-connect library (RainbowKit, wagmi) — fine for one form, would

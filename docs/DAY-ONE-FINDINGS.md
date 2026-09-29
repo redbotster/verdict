@@ -997,6 +997,25 @@ a user who might reject or delay between them, real gas estimation) hasn't been 
 needs an actual manual run before trusting this for a real deal between real counterparties, same
 caveat as every other real-money action in this project.
 
+**Addendum — the actual browser click-through, done for real.** No real wallet extension available to
+drive interactively, so built the next best thing: ran the real Next.js dev server against a real
+local Anvil chain, and drove the actual page (`localhost:3000/new`) through gstack's headless browser,
+with a `window.ethereum` injected into the real page that forwards every EIP-1193 call (`personal_sign`,
+`eth_sendTransaction`, reads) to a tiny local Node service signing with real Anvil test accounts —
+same JSON-RPC shape a real wallet extension produces, driven through the real React click handlers,
+not a script calling viem directly. Filled the real form, clicked through both dual-approval steps
+(payee connects, payer connects and signs — a real signature,
+`0x1c677ade...0d8f921b` — payee acknowledges, another real signature), then clicked "Deploy with
+payer's wallet" for real: the UI correctly showed `Deployed to 0x71c95911e9a5d330f4d621842ec243ee1343292e
+on chain 31337`, no console errors. Independently confirmed on-chain afterward: real deployed
+bytecode at that address, holding exactly `1000000000` — the deal's real amount. This is a genuine
+click-through of the actual UI code path (React state, button handlers, the two sequential wallet
+prompts), not just the underlying viem mechanism proven above — the one gap flagged in the paragraph
+above this addendum. The remaining, smaller gap: a *real* wallet extension's own UI chrome (its
+confirmation popups, a user free to reject or delay between the two prompts) still hasn't been
+exercised — this proves the code's wallet interaction is correct, not that a human using real MetaMask
+will have a good experience.
+
 ## 24. Two real production-readiness bugs, found by tracing the resolver's retry and approval paths
 
 Asked "what's left before this is production ready" and traced the actual code paths rather than
