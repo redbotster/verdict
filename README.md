@@ -58,12 +58,14 @@ hardcoded placeholder, and `/new` has a real "register the deployed escrow" step
 and it reads the real on-chain `questionHash`/`amount`/`feeBps`, refuses anything that doesn't match
 what was actually compiled, and writes the row for the resolver webhook to use later.
 
-And the raw-private-key gap is fully closable now, not just half (§22) — 1Claw can also submit the
-resolver's on-chain writes (`submitAttestation`/`release`), not just sign IMD's payment. Proven for
-real at zero cost using 1Claw's sign-only mode: a real transaction, correctly targeted and encoded,
-independently verified with viem to recover to the agent's real signing key. The deployed webhook's
-code supports this path; its live configuration deliberately doesn't use it yet — see "What's not
-done."
+1Claw can also sign the resolver's on-chain writes (`submitAttestation`/`release`), not just IMD's
+payment (§22) — real, correctly targeted and encoded transactions, independently verified with viem
+to recover to the agent's real signing key. But actually *broadcasting* them for real currently fails
+on 1Claw's own infrastructure, confirmed by trying it on Base mainnet with real USDC: 1Claw signs
+correctly, then its own RPC relay fails to deliver, returning a `tx_hash` for a transaction that was
+never actually sent. No funds were at risk — cleanly reclaimed once the demo's deadline elapsed — but
+this means the raw-private-key gap is still open on the delivery side, not just half-closed. See §22
+for the exact error and why the org's paid tier doesn't explain it.
 
 ## Layout
 
@@ -72,21 +74,23 @@ done."
 | `contracts/` | `MilestoneEscrow.sol`, the on-chain escrow | 56/56 tests, audited, live on Base mainnet (demo) |
 | `server/imd-client/` | IMD's paid-request client, all 8 steps | All real, including payment signing |
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
-| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end, including both typed-data signing and on-chain transaction submission through 1Claw's Intents API |
-| `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing; can relay through either a local account or 1Claw's Intents API |
+| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; typed-data signing and transaction signing both work through 1Claw's Intents API, but real broadcast delivery currently fails on 1Claw's own infrastructure (§22) |
+| `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing; can relay through a local account, or (once 1Claw's broadcast issue is resolved) 1Claw's Intents API |
 | `site/` | Status page + dual-approval deal creation + registration + resolver webhook | **Deployed for real** on Vercel (URL withheld, see above), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 
 ## What's not done
 
-- Both halves of retiring `EVM_PRIVATE_KEY` are now live-verified independently: typed-data signing
-  (§20, IMD's payment) and on-chain transaction submission (§22, `submitAttestation`/`release`), both
-  through 1Claw's Intents API. The deployed webhook's *code* prefers 1Claw over the raw key when
-  configured — its live *configuration* still deliberately doesn't have 1Claw credentials set,
-  because doing so makes a standing endpoint able to spend real `$IMD` on any future trigger, a real
-  decision rather than a default. The two pieces also haven't been exercised together end to end
-  against a real deployed escrow yet (§22) — only independently.
+- Retiring `EVM_PRIVATE_KEY` is only half-closed. Typed-data signing (§20, IMD's payment) works for
+  real. Transaction *signing* also works for real (§22) — but actual on-chain *delivery* of a signed
+  transaction through 1Claw currently fails on 1Claw's own broadcast infrastructure, confirmed by
+  trying it for real on Base mainnet. Until that's fixed (on 1Claw's side, or worked around by
+  broadcasting a 1Claw-signed raw tx through a normal RPC directly, which isn't built), a real
+  resolver still needs `EVM_PRIVATE_KEY` for the on-chain writes. The deployed webhook's code prefers
+  1Claw when configured and falls back to the raw key; its live configuration deliberately doesn't set
+  1Claw credentials, since doing so would make a standing endpoint able to spend real `$IMD` on any
+  future trigger — a decision, not a default.
 - The deployed webhook has no signer configured at all right now (neither path) — it stops cleanly
   at that point rather than relay anything.
 - A second real request finally got a successful attestation (§19), but the exact signature/signer
@@ -148,4 +152,4 @@ order it was found:
 | 19 | Topped up `$IMD` with a second real swap, and got the first-ever successful (non-disagreed) real attestation |
 | 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |
 | 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |
-| 22 | On-chain transaction submission via 1Claw — the other half of retiring `EVM_PRIVATE_KEY`, proven at zero cost |
+| 22 | On-chain transaction *signing* via 1Claw works; real *broadcast* fails on 1Claw's own infrastructure — confirmed on Base mainnet, no funds lost |

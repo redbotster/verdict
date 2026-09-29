@@ -16,10 +16,14 @@
 //   1. ONE_CLAW_RESOLVER_AGENT_ID / ONE_CLAW_RESOLVER_AGENT_API_KEY / ONE_CLAW_RESOLVER_ADDRESS —
 //      routes both IMD's payment signature (oneClawTypedDataSigner, §20) and the on-chain
 //      submitAttestation()/release() writes (oneClawTransactionRelay, §22) through 1Claw's Intents
-//      API. No private key ever exists in this process. Both pieces are independently live-verified
-//      real; this exact combination (used together, through this route, against a real deployed
-//      escrow) has not — see §22 for what's proven vs. not.
-//   2. EVM_PRIVATE_KEY — the original, raw-key fallback. Used if (1) isn't fully configured.
+//      API. No private key ever exists in this process. Payment signing and transaction *signing*
+//      are both live-verified real — but real on-chain *broadcast* currently fails on 1Claw's own
+//      infrastructure (confirmed on Base mainnet with real USDC, no funds lost): it signs correctly,
+//      returns a tx_hash, then never actually delivers. oneClawTransactionRelay now throws
+//      OneClawBroadcastFailedError when this happens rather than hanging on a receipt that never
+//      comes — but this path genuinely doesn't work end to end yet. See §22.
+//   2. EVM_PRIVATE_KEY — the original, raw-key fallback, and currently the only path that actually
+//      delivers a transaction. Used if (1) isn't fully configured.
 // Neither configured: refuses with a clear error rather than silently doing nothing.
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";

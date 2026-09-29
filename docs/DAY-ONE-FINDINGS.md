@@ -894,11 +894,41 @@ or anyone who has the webhook secret), not a single bounded action. That's a rea
 whoever owns this deployment to make deliberately, not something to default into as a side effect of
 "the code now supports it."
 
-**What's still not proven**: the two pieces have only been verified independently (typed-data signing
-in §20, transaction signing here) — this exact combination, used together through `resolveDeal()`
-against a real deployed escrow, has not been exercised end to end. Doing that for real needs either a
-funded 1Claw signing-key address on a real chain (the sign-only proof above needed no funds; an actual
-broadcast does) or a testnet with free faucet ETH — a reasonable next step, not done in this pass.
+**Addendum — tried the real broadcast, and it failed, for a specific, identified reason.** Ran
+`scripts/base-mainnet-oneclaw-relay-demo.ts` for real: funded the 1Claw signing key with real ETH,
+got a real free IMD quote, deployed a real `MilestoneEscrow` on Base mainnet with the wallet's real
+USDC (the exact same self-dealing demo shape as §12), then called `relay.submitAttestation()` through
+`oneClawTransactionRelay` for real — this time actually trying to broadcast, not sign-only.
+
+`OneClawClient.submitTransaction()` returned a `tx_hash` and the call didn't throw, but the
+transaction was never on-chain: `waitForTransactionReceipt` timed out, the signing key's nonce stayed
+at `0`, and its balance was untouched. Querying 1Claw's own `GET /v1/agents/:id/transactions` for the
+real answer (rather than guessing) showed the true status: `"status": "signed"`,
+`"error_message": "Broadcast failed: Request timeout on the free plan, please upgrade to paid
+plan."` — 1Claw signed the transaction successfully (matching the earlier sign-only proof exactly)
+but its own broadcast infrastructure refused to relay it to the chain, and returned a `tx_hash`
+anyway despite never actually broadcasting — worth flagging to 1Claw, since a caller has no way to
+tell "broadcast succeeded" from "broadcast silently failed" without independently checking status.
+
+This is confusing given this org's overall subscription is `"tier": "team"` (§19), not free — either
+transaction broadcast is metered on a separate, still-unupgraded dimension from the rest of the
+account, or the error message itself is wrong (a real possibility, given §20's docs-vs-reality gap
+was exactly this shape). Not resolved here; reported as observed, not diagnosed further.
+
+**No funds were at risk or lost.** The real USDC stayed correctly held in the escrow (the failed
+`submitAttestation` never touched it) until the deployment's short demo deadline+grace window
+elapsed, at which point `reclaim()` + `withdraw()` (via the local wallet, not 1Claw — this part of
+the flow was never in question) returned the exact original amount, confirmed on-chain:
+`2.166484 USDC`, byte-for-byte the starting balance.
+
+**Net result**: `oneClawTransactionRelay`'s *signing* is proven correct (independently, twice — the
+zero-cost sign-only test above, and this real attempt, which got as far as a correct signature before
+hitting 1Claw's own broadcast infrastructure). Actual *delivery* through 1Claw is currently blocked on
+something in 1Claw's own broadcast path, not on anything in this codebase. Until that's resolved (by
+1Claw, or by finding whatever upgrade/setting actually unblocks it), a real resolver still needs
+either the raw `EVM_PRIVATE_KEY` path or a self-broadcast alternative (sign via 1Claw's sign-only
+mode, then submit the raw signed tx through a normal RPC directly — not yet built, but a
+straightforward next step given the signature itself is already proven correct).
 
 ## What's still unconfirmed (needs real signing, so held back)
 

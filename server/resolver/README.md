@@ -140,17 +140,29 @@ signs and broadcasts via 1Claw's own dedicated RPC for the target chain). `relay
 `submitAttestation`/`release` functions unchanged) and `oneClawRelay.ts`'s `oneClawTransactionRelay`
 satisfy — `resolveDeal()`'s new `relay` option takes either, in place of `walletClient`.
 
-**Live-verified for real at zero cost, 2026-09-29** (`docs/DAY-ONE-FINDINGS.md` §22): using 1Claw's
-sign-only mode (`/transactions/sign` — signs inside the HSM, never broadcasts, so no gas is spent), a
-real, correctly ABI-encoded `submitAttestation()` call was signed through the agent's real key and
-independently verified with viem's `recoverTransactionAddress` — real signature, real calldata, real
-`to` address, just never broadcast. This closes the second (and last) piece needed to retire
-`EVM_PRIVATE_KEY` entirely from a deployed resolver.
+**Signing is live-verified for real at zero cost, 2026-09-29** (`docs/DAY-ONE-FINDINGS.md` §22): using
+1Claw's sign-only mode (`/transactions/sign` — signs inside the HSM, never broadcasts, so no gas is
+spent), a real, correctly ABI-encoded `submitAttestation()` call was signed through the agent's real
+key and independently verified with viem's `recoverTransactionAddress` — real signature, real
+calldata, real `to` address.
 
-**Not yet proven**: this and payment signing (§20) have only been verified independently — using both
-together through `resolveDeal()` against a real deployed escrow hasn't been exercised end to end, and
-doing so for real needs a funded 1Claw signing-key address (the sign-only proof above needed no
-funds; an actual broadcast does).
+**Real broadcast currently fails, though — confirmed by actually trying it**, not assumed:
+`scripts/base-mainnet-oneclaw-relay-demo.ts` deployed a real escrow on Base mainnet with real USDC and
+called `relay.submitAttestation()` for real. 1Claw signed it correctly (matching the sign-only proof
+exactly) but its own broadcast infrastructure failed to deliver it — a `tx_hash` came back, but the
+transaction was never on-chain. `GET /v1/agents/:id/transactions` gave the real reason:
+`status: "signed"`, `"Broadcast failed: ... please upgrade to paid plan"` — confusing, since this
+org's subscription is already on the paid "team" tier. `oneClawTransactionRelay` now checks the
+response `status` and throws `OneClawBroadcastFailedError` instead of trusting a `tx_hash` that was
+never delivered. No funds were at risk: the real USDC was cleanly reclaimed once the demo's short
+deadline+grace window elapsed, confirmed back at the exact original balance.
+
+**Net effect on retiring `EVM_PRIVATE_KEY`**: payment signing (§20) and transaction signing (here) are
+both proven. Actual on-chain *delivery* through 1Claw is not, currently — blocked on something in
+1Claw's own broadcast path, not this codebase. Until that's resolved, a real resolver still needs
+either the raw `EVM_PRIVATE_KEY` path or a "sign via 1Claw, broadcast the raw tx through a normal RPC
+directly" hybrid — not built, but straightforward given the signature itself is already proven
+correct.
 
 ## What's real and tested
 

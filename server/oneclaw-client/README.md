@@ -60,13 +60,19 @@ Added 2026-09-29, both live-verified against the real API:
   `types.EIP712Domain` explicitly, which viem-built typed data (this whole repo's convention) never
   includes.
 - **On-chain transaction submission** (`submitTransaction`, `signTransaction`) — the other kind of
-  write 1Claw's Intents API does: `POST /v1/agents/:id/transactions` signs and broadcasts a real
-  transaction via 1Claw's own dedicated RPC for the target chain; `/transactions/sign` signs the same
-  request but never broadcasts (BYORPC — free, since only broadcasting costs gas). **Live-verified for
-  real 2026-09-29** (`docs/DAY-ONE-FINDINGS.md` §22) using sign-only mode at zero cost: a real,
-  correctly ABI-encoded contract call, signed through the agent's real key, independently verified
-  with viem's `recoverTransactionAddress`. See `@verdict/resolver`'s `oneClawRelay.ts` for the
-  resolver-specific `TransactionRelay` implementation built on top.
+  write 1Claw's Intents API does: `POST /v1/agents/:id/transactions` signs and (in principle)
+  broadcasts a real transaction via 1Claw's own dedicated RPC for the target chain;
+  `/transactions/sign` signs the same request but never broadcasts (BYORPC — free, since only
+  broadcasting costs gas). **Signing is live-verified for real, twice** (`docs/DAY-ONE-FINDINGS.md`
+  §22): sign-only mode at zero cost (a real, correctly ABI-encoded contract call, signed through the
+  agent's real key, independently verified with viem's `recoverTransactionAddress`), and again during
+  a real `submitTransaction()` attempt that got a correct signature before failing to broadcast.
+  **Broadcasting itself currently fails** on this org's account — a 200 response with a real-looking
+  `tx_hash` that was never actually sent (confirmed via `GET /v1/agents/:id/transactions`:
+  `status: "signed"`, `error_message: "Broadcast failed: ... please upgrade to paid plan"`, despite
+  this org being on a paid "team" tier already). See `@verdict/resolver`'s `oneClawRelay.ts` — its
+  `TransactionRelay` implementation now checks `status` and throws `OneClawBroadcastFailedError`
+  rather than trusting a `tx_hash` that was never delivered.
 
 ## Auth
 

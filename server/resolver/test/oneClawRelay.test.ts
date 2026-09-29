@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decodeFunctionData } from "viem";
-import { oneClawTransactionRelay } from "../src/oneClawRelay.ts";
+import { oneClawTransactionRelay, OneClawBroadcastFailedError } from "../src/oneClawRelay.ts";
 import { loadMilestoneEscrowArtifact } from "../src/artifact.ts";
 import type { OneClawClient } from "../../oneclaw-client/src/client.ts";
 import type { SignedAttestation } from "../src/types.ts";
@@ -76,4 +76,18 @@ test("oneClawTransactionRelay.release: encodes a real release() call with no arg
   const decoded = decodeFunctionData({ abi, data: input.data });
   assert.equal(decoded.functionName, "release");
   assert.deepEqual(decoded.args ?? [], []);
+});
+
+test("oneClawTransactionRelay: throws OneClawBroadcastFailedError when 1Claw returns a tx_hash but status isn't 'broadcast'", async () => {
+  // Regression test for a real bug found live 2026-09-29 (docs/DAY-ONE-FINDINGS.md §22): 1Claw's
+  // /transactions endpoint can return 200 with a real-looking tx_hash even when it never actually
+  // broadcast (real observed status: "signed", with a "Broadcast failed: ... please upgrade to paid
+  // plan" error_message on GET .../transactions) — a caller trusting tx_hash alone would wait forever
+  // for a receipt that never comes.
+  const fakeClient = {
+    submitTransaction: async () => ({ id: "tx-3", tx_hash: "0xneverbroadcast", chain: "base", status: "signed" }),
+  } as unknown as OneClawClient;
+
+  const relay = oneClawTransactionRelay({ client: fakeClient, agentId: "agent-1", chain: "base" });
+  await assert.rejects(() => relay.release(ESCROW_ADDRESS), OneClawBroadcastFailedError);
 });
