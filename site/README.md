@@ -16,10 +16,11 @@ escrow balance, question text and status." Next.js App Router, read-only, server
   exact `EscrowTerms` authorization the contract's constructor checks (`lib/terms.ts` — the same
   scheme as `scripts/deploy-demo.ts` and `server/resolver`, verified to match), and the payee signs an
   off-chain acknowledgment. Ends with a ready-to-deploy JSON payload; it does not deploy anything.
-- `/api/resolve/[address]` — the webhook a 1Claw Automation calls at a deal's deadline; runs
-  `resolveDeal()` server-side with a real signer. Stateless (see "Where the data comes from" below)
-  and guarded by a shared secret (`X-Resolver-Secret` vs. `RESOLVER_WEBHOOK_SECRET`). Live-verified
-  end to end by a real deployed Automation — see `docs/DAY-ONE-FINDINGS.md` §18.
+- `/api/resolve/[address]` — the webhook a 1Claw Automation calls at a deal's deadline; looks the
+  deal up in Supabase by address and runs `resolveDeal()` server-side, preferring a 1Claw-backed
+  signer over a raw `EVM_PRIVATE_KEY` when configured (§22). Guarded by a shared secret
+  (`X-Resolver-Secret` vs. `RESOLVER_WEBHOOK_SECRET`). Live-verified end to end by a real deployed
+  Automation — see `docs/DAY-ONE-FINDINGS.md` §18.
 
 ## The `/new` flow needs its sibling packages as real dependencies, not just relative-path reads
 
@@ -104,9 +105,11 @@ secret). Getting it actually working (not just a green build) needed several thi
   not literal brackets, and the include silently matches nothing.
 - Real env vars set on the deployment: `RESOLVER_WEBHOOK_SECRET` (the webhook's auth),
   `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (real deal storage — see "Where the data comes from"
-  above). `EVM_PRIVATE_KEY` is deliberately **not** set — the webhook exists and validates real
-  requests but can't sign/relay until a real key (ideally the 1Claw-backed signer, not a raw one) is
-  added.
+  above). Neither `EVM_PRIVATE_KEY` nor `ONE_CLAW_RESOLVER_AGENT_ID`/`_AGENT_API_KEY`/`_ADDRESS` are
+  set — the webhook's code tries the 1Claw path first, then falls back to the raw key, then refuses
+  cleanly with neither (see the route's own header comment and `docs/DAY-ONE-FINDINGS.md` §22). Not
+  activating the 1Claw path on this deployment is deliberate: it would make a live, standing endpoint
+  able to spend real `$IMD` on any future trigger, a real decision rather than a default.
 - `lib/demo-deal.local.json`'s Base mainnet entry uses a dRPC key, not the public `mainnet.base.org` —
   the public endpoint works fine locally but was consistently rejected from Vercel's serverless IPs.
 

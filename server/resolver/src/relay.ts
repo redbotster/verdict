@@ -4,7 +4,10 @@ import type { AttestationMessage, SignedAttestation } from "./types.ts";
 
 type Signer = WalletClient<Transport, Chain, Account>;
 
-function toAbiMessage(m: AttestationMessage) {
+// Shared by both ways resolveDeal() can submit a write to the escrow: a local viem account
+// (viemTransactionRelay below), or a 1Claw-held key that never touches this process
+// (oneClawRelay.ts). Exported so both toAbiMessage's shape and the ABI stay in exactly one place.
+export function toAbiMessage(m: AttestationMessage) {
   // Field order here doesn't need to match the struct — viem encodes tuples by ABI position from
   // the artifact, using each key by name — but the set of keys must match exactly.
   return {
@@ -65,4 +68,19 @@ export async function readEscrowState(publicClient: PublicClient, escrowAddress:
     publicClient.readContract({ address: escrowAddress, abi, functionName: "owed", args: [account] }) as Promise<bigint>,
   ]);
   return { state, trueAt, owed };
+}
+
+// The two writes resolveDeal() actually needs, behind an interface either a local viem account or a
+// 1Claw-held key (oneClawRelay.ts's oneClawTransactionRelay) can satisfy — resolveDeal() itself
+// never needs to know which.
+export interface TransactionRelay {
+  submitAttestation(escrowAddress: `0x${string}`, attestation: SignedAttestation): Promise<Hash>;
+  release(escrowAddress: `0x${string}`): Promise<Hash>;
+}
+
+export function viemTransactionRelay(walletClient: Signer): TransactionRelay {
+  return {
+    submitAttestation: (escrowAddress, attestation) => submitAttestation(walletClient, escrowAddress, attestation),
+    release: (escrowAddress) => release(walletClient, escrowAddress),
+  };
 }

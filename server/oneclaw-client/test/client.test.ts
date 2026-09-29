@@ -35,3 +35,44 @@ test("sign(): serializes BigInt fields in the typed_data message instead of thro
   const parsed = JSON.parse(capturedBody!);
   assert.equal(parsed.typed_data.message.amount, "500000000000000000");
 });
+
+test("submitTransaction(): posts to /transactions and returns the broadcast result", async (t) => {
+  let capturedUrl: string | undefined;
+  let capturedBody: string | undefined;
+  t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.toString().endsWith("/auth/agent-token")) {
+      return new Response(JSON.stringify({ access_token: "fake", token_type: "Bearer", expires_in: 900 }), { status: 200 });
+    }
+    capturedUrl = url.toString();
+    capturedBody = init?.body as string;
+    return new Response(JSON.stringify({ id: "tx-1", tx_hash: "0xhash", chain: "ethereum", status: "broadcast" }), { status: 200 });
+  });
+
+  const client = new OneClawClient({ agentId: "agent-1", agentApiKey: "ocv_fake" });
+  const result = await client.submitTransaction("agent-1", { chain: "ethereum", to: "0xabc", value: "0", data: "0xdeadbeef" });
+
+  assert.equal(capturedUrl, "https://api.1claw.co/v1/agents/agent-1/transactions");
+  assert.deepEqual(JSON.parse(capturedBody!), { chain: "ethereum", to: "0xabc", value: "0", data: "0xdeadbeef" });
+  assert.deepEqual(result, { id: "tx-1", tx_hash: "0xhash", chain: "ethereum", status: "broadcast" });
+});
+
+test("signTransaction(): posts to /transactions/sign and returns the signed (unbroadcast) result", async (t) => {
+  let capturedUrl: string | undefined;
+  t.mock.method(globalThis, "fetch", async (url: string) => {
+    if (url.toString().endsWith("/auth/agent-token")) {
+      return new Response(JSON.stringify({ access_token: "fake", token_type: "Bearer", expires_in: 900 }), { status: 200 });
+    }
+    capturedUrl = url.toString();
+    return new Response(
+      JSON.stringify({ signed_tx: "0xsigned", tx_hash: "0xhash", from: "0xfrom", to: "0xabc", chain: "ethereum", chain_id: 1, nonce: 0, value_wei: "0", status: "sign_only" }),
+      { status: 200 },
+    );
+  });
+
+  const client = new OneClawClient({ agentId: "agent-1", agentApiKey: "ocv_fake" });
+  const result = await client.signTransaction("agent-1", { chain: "ethereum", to: "0xabc", value: "0" });
+
+  assert.equal(capturedUrl, "https://api.1claw.co/v1/agents/agent-1/transactions/sign");
+  assert.equal(result.status, "sign_only");
+  assert.equal(result.signed_tx, "0xsigned");
+});

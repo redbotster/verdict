@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveDeal } from "../src/resolve.ts";
+import { resolveDeal, TransactionRelayNotConfiguredError } from "../src/resolve.ts";
 import type { GetAttestationFn } from "../src/resolve.ts";
+import type { TransactionRelay } from "../src/relay.ts";
 import type { SignedAttestation, EscrowRef } from "../src/types.ts";
 import type { OracleRequestInput } from "../../oracle-compiler/src/types.ts";
 import type { PublicClient, WalletClient, Account, Chain, Transport } from "viem";
@@ -183,4 +184,60 @@ test("resolveDeal: relaying still succeeds even if the settle attempt fails (cha
     assert.equal(result.settleTxHash, undefined);
     assert.ok(result.txHash);
   }
+});
+
+test("resolveDeal: options.relay is used instead of walletClient when both submitting writes", async () => {
+  const publicClient = { waitForTransactionReceipt: async () => ({}) } as unknown as PublicClient;
+  const getAttestation: GetAttestationFn = async () => fakeAttestation();
+  const relayCalls: string[] = [];
+  const relay: TransactionRelay = {
+    submitAttestation: async () => {
+      relayCalls.push("submitAttestation");
+      return "0xtxhash-relay-submit" as `0x${string}`;
+    },
+    release: async () => {
+      relayCalls.push("release");
+      return "0xtxhash-relay-release" as `0x${string}`;
+    },
+  };
+
+  const result = await resolveDeal(
+    { escrow: ESCROW, oracleInput: ORACLE_INPUT, expectedQuestionHash: QUESTION_HASH, payoutEstimateBaseUnits: 0n },
+    { getAttestation, relay, publicClient, approvalGate: async () => "approved" },
+  );
+
+  assert.equal(result.relayed, true);
+  if (result.relayed) {
+    assert.equal(result.txHash, "0xtxhash-relay-submit");
+    assert.equal(result.settleTxHash, "0xtxhash-relay-release");
+  }
+  assert.deepEqual(relayCalls, ["submitAttestation", "release"]);
+});
+
+test("resolveDeal: throws a clear error if neither walletClient nor relay is configured, once it actually needs to relay", async () => {
+  const publicClient = { waitForTransactionReceipt: async () => ({}) } as unknown as PublicClient;
+  const getAttestation: GetAttestationFn = async () => fakeAttestation();
+
+  await assert.rejects(
+    () =>
+      resolveDeal(
+        { escrow: ESCROW, oracleInput: ORACLE_INPUT, expectedQuestionHash: QUESTION_HASH, payoutEstimateBaseUnits: 0n },
+        { getAttestation, publicClient, approvalGate: async () => "approved" },
+      ),
+    TransactionRelayNotConfiguredError,
+  );
+});
+
+test("resolveDeal: a questionHash mismatch aborts before ever needing a relay at all", async () => {
+  const publicClient = { waitForTransactionReceipt: async () => ({}) } as unknown as PublicClient;
+  const getAttestation: GetAttestationFn = async () => fakeAttestation({ questionHash: "0xdeadbeef" as `0x${string}` });
+
+  // No walletClient, no relay — must not throw, since it should never reach the relay step.
+  const result = await resolveDeal(
+    { escrow: ESCROW, oracleInput: ORACLE_INPUT, expectedQuestionHash: QUESTION_HASH, payoutEstimateBaseUnits: 0n },
+    { getAttestation, publicClient },
+  );
+
+  assert.equal(result.relayed, false);
+  if (!result.relayed) assert.equal(result.reason, "question_hash_mismatch");
 });

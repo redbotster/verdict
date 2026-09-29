@@ -59,6 +59,14 @@ Added 2026-09-29, both live-verified against the real API:
   "no error thrown." `withDomainType()` handles a real wire-format gap: 1Claw's hasher requires
   `types.EIP712Domain` explicitly, which viem-built typed data (this whole repo's convention) never
   includes.
+- **On-chain transaction submission** (`submitTransaction`, `signTransaction`) — the other kind of
+  write 1Claw's Intents API does: `POST /v1/agents/:id/transactions` signs and broadcasts a real
+  transaction via 1Claw's own dedicated RPC for the target chain; `/transactions/sign` signs the same
+  request but never broadcasts (BYORPC — free, since only broadcasting costs gas). **Live-verified for
+  real 2026-09-29** (`docs/DAY-ONE-FINDINGS.md` §22) using sign-only mode at zero cost: a real,
+  correctly ABI-encoded contract call, signed through the agent's real key, independently verified
+  with viem's `recoverTransactionAddress`. See `@verdict/resolver`'s `oneClawRelay.ts` for the
+  resolver-specific `TransactionRelay` implementation built on top.
 
 ## Auth
 

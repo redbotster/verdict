@@ -147,6 +147,41 @@ export interface SignResult {
   typed_data_hash?: `0x${string}`;
 }
 
+// docs.1claw.co/docs/agents/intents/signing (read 2026-09-29) — POST /v1/agents/:id/transactions
+// (broadcasts) and its /sign variant (signs only, doesn't broadcast) share this request shape.
+// `value` is the human-readable major unit as a decimal string (e.g. "0.1" ETH), not wei — 1Claw
+// converts internally. `signing_key_path` is optional; omitted, it auto-resolves to the agent's
+// per-chain provisioned key.
+export interface TransactionInput {
+  chain: string;
+  to: `0x${string}`;
+  value: string;
+  data?: `0x${string}`;
+  signing_key_path?: string;
+  simulate_first?: boolean;
+  max_fee_per_gas?: string;
+  max_priority_fee_per_gas?: string;
+}
+
+export interface SubmittedTransaction {
+  id: string;
+  tx_hash: `0x${string}`;
+  chain: string;
+  status: string;
+}
+
+export interface SignedTransaction {
+  signed_tx: `0x${string}`;
+  tx_hash: `0x${string}`;
+  from: `0x${string}`;
+  to: `0x${string}`;
+  chain: string;
+  chain_id: number;
+  nonce: number;
+  value_wei: string;
+  status: string;
+}
+
 // RFC 7807-style error body, per docs.1claw.co/docs/vaults/human-api/overview.
 export interface OneClawErrorBody {
   type?: string;

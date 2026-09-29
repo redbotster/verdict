@@ -131,6 +131,27 @@ and whether a witness (`PermitWitnessTransferFrom`) is required are IMD-specific
 separately in §13/§14; `imdPaymentSigner` (not `permit2.ts`) is what a real payment actually uses, and
 it's now equally able to take a 1Claw-backed signer as its `account` — see `paymentSigner.ts`.
 
+## On-chain writes via 1Claw's Intents API (`src/oneClawRelay.ts`)
+
+Payment signing (above) is a typed-data *signature* — `submitAttestation()`/`release()` are on-chain
+transaction *submissions*, a different 1Claw endpoint (`POST /v1/agents/:id/transactions`, which
+signs and broadcasts via 1Claw's own dedicated RPC for the target chain). `relay.ts` now exports a
+`TransactionRelay` interface both a local viem account (`viemTransactionRelay`, wrapping the existing
+`submitAttestation`/`release` functions unchanged) and `oneClawRelay.ts`'s `oneClawTransactionRelay`
+satisfy — `resolveDeal()`'s new `relay` option takes either, in place of `walletClient`.
+
+**Live-verified for real at zero cost, 2026-09-29** (`docs/DAY-ONE-FINDINGS.md` §22): using 1Claw's
+sign-only mode (`/transactions/sign` — signs inside the HSM, never broadcasts, so no gas is spent), a
+real, correctly ABI-encoded `submitAttestation()` call was signed through the agent's real key and
+independently verified with viem's `recoverTransactionAddress` — real signature, real calldata, real
+`to` address, just never broadcast. This closes the second (and last) piece needed to retire
+`EVM_PRIVATE_KEY` entirely from a deployed resolver.
+
+**Not yet proven**: this and payment signing (§20) have only been verified independently — using both
+together through `resolveDeal()` against a real deployed escrow hasn't been exercised end to end, and
+doing so for real needs a funded 1Claw signing-key address (the sign-only proof above needed no
+funds; an actual broadcast does).
+
 ## What's real and tested
 
 - **`relay.ts`** (`submitAttestation`, `release`, `reclaim`, `withdraw`, `readEscrowState`) — genuine

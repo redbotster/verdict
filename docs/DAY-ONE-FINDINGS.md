@@ -852,6 +852,54 @@ resolves outside Next's bundler, the same documented limitation `server/resolver
 already works around for `lib/escrow.ts` — so the script inlines the two on-chain reads and calls
 `createDeal()` directly instead, exercising the same real logic and the same real dependencies.)
 
+## 22. On-chain transaction submission via 1Claw — the other half of retiring `EVM_PRIVATE_KEY`
+
+§20 proved 1Claw's Intents API for *typed-data signing* (IMD's payment signature). The resolver's
+other two writes — `submitAttestation()` and `release()` — are on-chain transaction submissions, a
+different endpoint (`POST /v1/agents/:id/transactions` and its sign-only `/sign` variant,
+`docs.1claw.co/docs/agents/intents/signing`, read 2026-09-29): the vault decrypts the key inside the
+HSM boundary, builds and signs the transaction, and broadcasts it via 1Claw's own dedicated RPC for
+the target chain — this process's environment never holds a raw key either way.
+
+**Built**: `OneClawClient.submitTransaction()`/`.signTransaction()` (`server/oneclaw-client`), a
+`TransactionRelay` interface in `server/resolver/src/relay.ts` that both a local viem account
+(`viemTransactionRelay`, wrapping the existing `submitAttestation`/`release` functions unchanged —
+zero behavior change for every existing caller) and a new 1Claw-backed implementation
+(`oneClawTransactionRelay`, `server/resolver/src/oneClawRelay.ts`) can satisfy. `resolveDeal()`
+gained an optional `relay` option (takes precedence over `walletClient` when both are given, and
+`walletClient` is now optional) — a `TransactionRelayNotConfiguredError` fires only when the code
+actually reaches the point of needing one, not on construction, so a `questionHash` mismatch (which
+never needs to relay anything) still short-circuits cleanly with neither configured.
+
+**Live-verified for real, at zero cost**: 1Claw's sign-only mode (`/transactions/sign`) signs inside
+the HSM but never broadcasts, so signing itself costs no gas — the same discipline as every other
+"prove it's real without spending money we don't need to" step in this log. Built a real, correctly
+ABI-encoded `submitAttestation()` calldata (via `oneClawRelay.ts`'s exact code path) against a
+fabricated escrow address, signed it through the agent's real key, and independently verified with
+viem: `recoverTransactionAddress` recovers to the agent's real signing-key address
+(`0x2590fc6823ede90dbebac41bb5759c14555e6aab`), the parsed `to` matches, and the parsed calldata
+matches byte-for-byte what was sent. Real transaction, real signature, real verification — just
+never broadcast, so no gas spent and no dependency on that key holding any balance.
+
+**Wired into the deployed webhook's code, not its live configuration.**
+`site/app/api/resolve/[address]/route.ts` now tries `ONE_CLAW_RESOLVER_AGENT_ID`/
+`ONE_CLAW_RESOLVER_AGENT_API_KEY`/`ONE_CLAW_RESOLVER_ADDRESS` first (routing both the payment
+signature and the on-chain writes through 1Claw, no private key in the process at all) and falls
+back to `EVM_PRIVATE_KEY` if those aren't all set. **Deliberately not activated on the actual
+deployment** — those three env vars are not set there. The reasoning: every other real-money action
+in this project has been a one-off, explicitly requested action with a visible, bounded outcome.
+Setting real 1Claw credentials on the live webhook is different in kind — it makes a *standing*
+endpoint capable of autonomously spending real `$IMD` on any future trigger (a real Automation firing,
+or anyone who has the webhook secret), not a single bounded action. That's a real decision for
+whoever owns this deployment to make deliberately, not something to default into as a side effect of
+"the code now supports it."
+
+**What's still not proven**: the two pieces have only been verified independently (typed-data signing
+in §20, transaction signing here) — this exact combination, used together through `resolveDeal()`
+against a real deployed escrow, has not been exercised end to end. Doing that for real needs either a
+funded 1Claw signing-key address on a real chain (the sign-only proof above needed no funds; an actual
+broadcast does) or a testnet with free faucet ETH — a reasonable next step, not done in this pass.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

@@ -6,8 +6,24 @@ import { withConsumer } from "../../oracle-compiler/src/templates/common.ts";
 import { NOT_IMPLEMENTED_APPROVAL_GATE, needsApproval, type ApprovalGate } from "./approval.ts";
 import { NOT_IMPLEMENTED_PAYMENT_SIGNER, type PaymentSigner } from "./paymentSigner.ts";
 import { fetchOracleAttestation } from "./oracleResult.ts";
-import { release, submitAttestation } from "./relay.ts";
+import { viemTransactionRelay, type TransactionRelay } from "./relay.ts";
 import type { EscrowRef, SignedAttestation } from "./types.ts";
+
+export class TransactionRelayNotConfiguredError extends Error {
+  constructor() {
+    super("resolveDeal() needs either options.walletClient (a local viem account) or options.relay (e.g. oneClawRelay.ts's oneClawTransactionRelay) to submit on-chain writes");
+    this.name = "TransactionRelayNotConfiguredError";
+  }
+}
+
+const NOT_IMPLEMENTED_RELAY: TransactionRelay = {
+  submitAttestation: async () => {
+    throw new TransactionRelayNotConfiguredError();
+  },
+  release: async () => {
+    throw new TransactionRelayNotConfiguredError();
+  },
+};
 
 export type GetAttestationFn = (input: OracleRequestInput, imdToken: string) => Promise<SignedAttestation>;
 
@@ -51,7 +67,14 @@ export interface ResolveDealOptions {
   /** Injectable for tests; production defaults to defaultGetAttestation. */
   getAttestation?: GetAttestationFn;
   publicClient: PublicClient;
-  walletClient: WalletClient<Transport, Chain, Account>;
+  /** A local viem account — the default path. Ignored if `relay` is also given. */
+  walletClient?: WalletClient<Transport, Chain, Account>;
+  /**
+   * An alternative to `walletClient` for submitting the two on-chain writes below — e.g.
+   * oneClawRelay.ts's oneClawTransactionRelay, so the signing key never has to live in this
+   * process's environment at all. Takes precedence over `walletClient` if both are given.
+   */
+  relay?: TransactionRelay;
 }
 
 export type ResolveResult =
@@ -68,6 +91,7 @@ export type ResolveResult =
 export async function resolveDeal(params: ResolveDealParams, options: ResolveDealOptions): Promise<ResolveResult> {
   const imdToken = options.imdToken ?? generateClientToken();
   const finalInput = withConsumer(params.oracleInput, params.escrow.chainId, params.escrow.address);
+  const relay = options.relay ?? (options.walletClient ? viemTransactionRelay(options.walletClient) : NOT_IMPLEMENTED_RELAY);
 
   const getAttestation = options.getAttestation ?? defaultGetAttestation(options.paymentSigner ?? NOT_IMPLEMENTED_PAYMENT_SIGNER);
   const attestation = await getAttestation(finalInput, imdToken);
@@ -89,7 +113,7 @@ export async function resolveDeal(params: ResolveDealParams, options: ResolveDea
     }
   }
 
-  const txHash = await submitAttestation(options.walletClient, params.escrow.address, attestation);
+  const txHash = await relay.submitAttestation(params.escrow.address, attestation);
   await options.publicClient.waitForTransactionReceipt({ hash: txHash });
 
   let settled = false;
@@ -98,7 +122,7 @@ export async function resolveDeal(params: ResolveDealParams, options: ResolveDea
     // Best-effort: release() is permissionless, so a failure here (most likely: the challenge window
     // hasn't elapsed yet) just means settlement waits for someone else, or a later run, to call it.
     try {
-      settleTxHash = await release(options.walletClient, params.escrow.address);
+      settleTxHash = await relay.release(params.escrow.address);
       await options.publicClient.waitForTransactionReceipt({ hash: settleTxHash });
       settled = true;
     } catch {

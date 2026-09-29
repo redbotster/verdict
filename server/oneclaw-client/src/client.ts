@@ -14,6 +14,9 @@ import type {
   SecretType,
   SignResult,
   SigningKey,
+  SignedTransaction,
+  SubmittedTransaction,
+  TransactionInput,
   Vault,
   WorkflowStep,
   OneClawErrorBody,
@@ -360,6 +363,30 @@ export class OneClawClient {
       body: JSON.stringify(request, (_key, value) => (typeof value === "bigint" ? value.toString() : value)),
     });
     return parseJsonOrThrow<SignResult>(res);
+  }
+
+  // Signs AND broadcasts via 1Claw's own dedicated RPC for the target chain — the vault decrypts
+  // the key inside the HSM boundary, builds, signs, and sends. `data` carries raw ABI-encoded
+  // calldata for a contract call (viem's encodeFunctionData); omit it for a plain native transfer.
+  async submitTransaction(agentId: string, input: TransactionInput): Promise<SubmittedTransaction> {
+    const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/transactions`, {
+      method: "POST",
+      headers: await this.headers(),
+      body: JSON.stringify(input),
+    });
+    return parseJsonOrThrow<SubmittedTransaction>(res);
+  }
+
+  // Sign-only (BYORPC): same request shape as submitTransaction, but never broadcasts — returns the
+  // raw signed tx hex for the caller to broadcast itself. No gas is spent signing; only broadcasting
+  // costs anything, which is exactly why this is the free way to prove signing works for real.
+  async signTransaction(agentId: string, input: TransactionInput): Promise<SignedTransaction> {
+    const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/transactions/sign`, {
+      method: "POST",
+      headers: await this.headers(),
+      body: JSON.stringify(input),
+    });
+    return parseJsonOrThrow<SignedTransaction>(res);
   }
 }
 
