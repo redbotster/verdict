@@ -462,13 +462,50 @@ spec prose alone). While the request is still being worked (`status: "assessing"
 ```
 
 `attestation`/`signature`/`signer`/`attestedAt` are null while `status: "assessing"` — presumably
-populated once the panel finishes. **Not yet confirmed**: the exact populated shape once resolved
-(needs checking back on this real request, `b3184afe-f7b7-4038-87f3-8737dc29f16d`, once it settles) —
-that will finally confirm or correct `oracleResult.ts`'s current best-effort parsing.
+populated once the panel finishes.
 
 This is the single point this entire project was blocked on, for the entire session, now closed: the
 whole IMD paid-request flow — compile, quote, challenge, sign, pay, get admitted — is real, working,
 and proven with real money end to end.
+
+## 15. A real panel can legitimately `"disagree"` even when every member reaches the same real-world answer — and no attestation is ever signed when that happens
+
+Checked back on the real request from §14 two minutes later. Result:
+[`GET /oracle/requests/b3184afe-...`](https://api.imd.fun/oracle/requests/b3184afe-f7b7-4038-87f3-8737dc29f16d)
+returned `status: "disagreed"`, `failure: "1 of 4 answers agreed; 4 were required."` — despite **all
+four responding panelists independently reaching the identical, objectively correct real-world
+answer** (`answer: false` — `octocat/Hello-World` genuinely has zero GitHub releases, confirmed by
+each member's own cited evidence).
+
+**Why it disagreed anyway**: IMD's agreement/clustering mechanism doesn't just compare the boolean
+`answer` — it also clusters by each member's `recipe.source` (the evidence URL cited), and that
+comparison is stricter than semantic equivalence. Three of the four members cited
+`https://api.github.com/repos/octocat/Hello-World/releases` (the API endpoint); one cited
+`https://github.com/octocat/Hello-World/releases` (the human-facing page — the exact same
+underlying fact). The response's `agreement.cluster` contains only **one** submission hash, with the
+other three listed under `agreement.outsideSources` — the clustering didn't unify the API-URL members
+with each other, only exactly one recipe ended up in its own cluster of one. (Also notable: `panelSize:
+5` but only 4 `members` ever submitted at all — one panelist simply never responded; quorum then
+needed 4-of-the-4-that-did-answer to cluster, not adjusted for the missing fifth.)
+
+**Real product risk, not just a curiosity**: `attestation`, `signature`, and `signer` all stay `null`
+on a `"disagreed"` outcome — **no attestation is ever signed**, true or false. For this specific
+request (the real answer was `false` anyway — "milestone not met"), that's a survivable outcome: the
+escrow's own design already handles "no attestation ever arrives" via `reclaim()` after
+`deadline + grace`, and a payer reclaiming when nothing was ever attested reads the same either way.
+**But the same disagreement mechanism could just as easily fire when the real-world answer is
+`true`** — different panelists citing a project's GitHub API vs. its web UI as their source for a
+release that genuinely was published, for instance — silently producing zero attestation for a milestone that
+actually was met, with the deal falling through to `reclaim()` (paid back to the payer) despite the
+payee having done the work. This is a real, observed failure mode against IMD's live oracle, not a
+hypothetical edge case — worth raising with IMD directly (does `guards.sources` further constrain or
+pin which source panelists must cite, to make clustering more reliable?), and worth the product
+being explicit with users that "no attestation ever arrives" is a real possible outcome distinct from
+"the milestone was attested false," even though the contract currently can't tell the two apart.
+
+**Still not confirmed**: the *successful* populated shape (`attestation`/`signature`/`signer` actually
+filled in) — this specific real request never reached that state. A future real paid request that
+achieves quorum would be needed to observe it.
 
 ## What's still unconfirmed (needs real signing, so held back)
 
@@ -477,10 +514,12 @@ and proven with real money end to end.
   §14**: a real paid submission using this exact schema was admitted on the first attempt, no
   corrections needed. Only remaining caveat: it's IMD's current frontend logic, not a versioned
   contract, so it could still change without notice in the future.
-- ~~The real `GET /oracle/requests/:id` response envelope~~ — the shape while `status: "assessing"`
-  is now confirmed (§14); the populated shape once a request actually resolves (what `attestation`/
-  `signature`/`signer` look like filled in) is still open — check back on request
-  `b3184afe-f7b7-4038-87f3-8737dc29f16d` once it settles.
+- ~~The real `GET /oracle/requests/:id` response envelope~~ — the `"assessing"` shape (§14) and the
+  `"disagreed"` failure shape (§15, including the full `members`/`agreement`/`failure` detail) are
+  both now confirmed. Still open: the *successful* populated shape
+  (`attestation`/`signature`/`signer` actually filled in) — the one real paid request run so far
+  disagreed rather than reaching quorum, so a future real request that succeeds would be needed to
+  observe it.
 - ~~Whether 1Claw's Intents API can actually produce that signature~~ — answered in §7: yes,
   mechanically (it's a generic EIP-712 signer via `POST /v1/agents/:id/sign`), but only once we have
   the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema. Now that §13 supplies
