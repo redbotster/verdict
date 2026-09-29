@@ -87,12 +87,17 @@ test("resolver relay: submitAttestation and release against a real deployed Mile
   const tokenAddress = usdcReceipt.contractAddress!;
 
   const AMOUNT = 1_000_000_000n; // 1000 USDC at 6 decimals
-  await walletFor(deployer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "mint", args: [payer.address, AMOUNT] });
+  const mintHash = await walletFor(deployer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "mint", args: [payer.address, AMOUNT] });
+  await publicClient.waitForTransactionReceipt({ hash: mintHash });
 
   // --- Predict the escrow's address so the payer can pre-approve it (the constructor pulls funds) ---
+  // Must read the nonce AFTER the mint is mined (not just submitted) — a query issued in the gap
+  // between submission and mining is a real race, rare enough to never show up locally but real on a
+  // loaded CI runner, and it silently predicts the wrong address rather than erroring immediately.
   const deployerNonce = await publicClient.getTransactionCount({ address: deployer.address });
   const predictedEscrow = getContractAddress({ from: deployer.address, nonce: BigInt(deployerNonce) });
-  await walletFor(payer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "approve", args: [predictedEscrow, AMOUNT] });
+  const approveHash = await walletFor(payer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "approve", args: [predictedEscrow, AMOUNT] });
+  await publicClient.waitForTransactionReceipt({ hash: approveHash }); // must be mined before the escrow constructor's transferFrom runs
 
   // --- Build deal terms and the payer's authorization signature (mirrors the contract's own check) ---
   const latestBlock = await publicClient.getBlock();

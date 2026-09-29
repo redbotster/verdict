@@ -57,11 +57,14 @@ async function main() {
   const tokenAddress = (await publicClient.waitForTransactionReceipt({ hash: usdcDeployHash })).contractAddress!;
 
   const AMOUNT = 2_500_000_000n; // 2500 USDC at 6 decimals
-  await walletFor(deployer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "mint", args: [payer.address, AMOUNT] });
+  const mintHash = await walletFor(deployer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "mint", args: [payer.address, AMOUNT] });
+  await publicClient.waitForTransactionReceipt({ hash: mintHash });
 
+  // Must read the nonce after the mint is mined, not just submitted — see server/resolver's integration test.
   const deployerNonce = await publicClient.getTransactionCount({ address: deployer.address });
   const predictedEscrow = getContractAddress({ from: deployer.address, nonce: BigInt(deployerNonce) });
-  await walletFor(payer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "approve", args: [predictedEscrow, AMOUNT] });
+  const approveHash = await walletFor(payer).writeContract({ address: tokenAddress, abi: usdcArtifact.abi, functionName: "approve", args: [predictedEscrow, AMOUNT] });
+  await publicClient.waitForTransactionReceipt({ hash: approveHash }); // must be mined before the escrow constructor's transferFrom runs
 
   const latestBlock = await publicClient.getBlock();
   const now = latestBlock.timestamp;
