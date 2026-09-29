@@ -74,7 +74,7 @@ async function main() {
     const CHALLENGE_WINDOW = 60n;
     const FEE_BPS = 150;
     const QUESTION_HASH = keccak256(toHex("Did acme/widget publish a release?"));
-    const DOMAIN_NAME = "IMD-Attestation";
+    const DOMAIN_NAME = "IdentityMD Oracle"; // real value, confirmed — docs/DAY-ONE-FINDINGS.md §25
     const DOMAIN_VERSION = "1";
 
     // --- This is the part that mirrors handleDeploy() exactly: same account approves and deploys ---

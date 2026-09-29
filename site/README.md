@@ -137,10 +137,9 @@ here. `/new` can now deploy the escrow itself (see above), proven both at the me
 Anvil, `scripts/deploy-self-service-test.ts`) and with a real click-through of the actual UI (real dev
 server, real page, an injected `window.ethereum`, driven through the real React click handlers — see
 `docs/DAY-ONE-FINDINGS.md` §23's addendum). The one remaining gap is a real MetaMask-style extension's
-own confirmation-popup UX, which this doesn't exercise. Its `oracleSigner` field is still a form input
-the operator must fill in correctly — IMD's real
-attestation signer address has never been confirmed (see `docs/DAY-ONE-FINDINGS.md`), so there's
-nothing to default it to yet. Wallet interaction is a raw EIP-1193 `window.ethereum` call via viem's
+own confirmation-popup UX, which this doesn't exercise. Its `oracleSigner` field now defaults to IMD's
+real confirmed attestation signer address (`docs/DAY-ONE-FINDINGS.md` §25) — still editable, for a
+deal against a different oracle instance. Wallet interaction is a raw EIP-1193 `window.ethereum` call via viem's
 `custom` transport, not a full wallet-connect library (RainbowKit, wagmi) — fine for one form, would
 need revisiting for a real multi-wallet product surface.
 

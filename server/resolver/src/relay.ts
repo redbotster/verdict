@@ -1,4 +1,4 @@
-import type { Account, Chain, Hash, PublicClient, Transport, WalletClient } from "viem";
+import { encodeAbiParameters, type Account, type Chain, type Hash, type PublicClient, type Transport, type WalletClient } from "viem";
 import { loadMilestoneEscrowArtifact } from "./artifact.ts";
 import type { AttestationMessage, SignedAttestation } from "./types.ts";
 
@@ -7,6 +7,9 @@ type Signer = WalletClient<Transport, Chain, Account>;
 // Shared by both ways resolveDeal() can submit a write to the escrow: a local viem account
 // (viemTransactionRelay below), or a 1Claw-held key that never touches this process
 // (oneClawRelay.ts). Exported so both toAbiMessage's shape and the ABI stay in exactly one place.
+// `answer` is dynamic `bytes` on the wire (confirmed live, docs/DAY-ONE-FINDINGS.md §25) — encoded
+// here from the convenience-layer boolean, the same ABI-encoded-bool shape IMD's own real
+// attestations use.
 export function toAbiMessage(m: AttestationMessage) {
   // Field order here doesn't need to match the struct — viem encodes tuples by ABI position from
   // the artifact, using each key by name — but the set of keys must match exactly.
@@ -15,10 +18,11 @@ export function toAbiMessage(m: AttestationMessage) {
     chainId: m.chainId,
     questionHash: m.questionHash,
     answerType: m.answerType,
-    answer: m.answer,
+    answer: encodeAbiParameters([{ type: "bool" }], [m.answer]),
     figure: m.figure,
     fromBlock: m.fromBlock,
     toBlock: m.toBlock,
+    blockHash: m.blockHash,
     panelJobId: m.panelJobId,
     issuedAt: m.issuedAt,
     expiresAt: m.expiresAt,

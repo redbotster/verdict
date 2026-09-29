@@ -11,7 +11,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract MilestoneEscrowTest is Test {
     bytes32 private constant ATTESTATION_TYPEHASH = keccak256(
-        "Attestation(uint256 requestId,uint256 chainId,bytes32 questionHash,string answerType,bool answer,string figure,uint256 fromBlock,uint256 toBlock,string panelJobId,uint64 issuedAt,uint64 expiresAt)"
+        "OracleAttestation(bytes32 requestId,uint256 chainId,bytes32 questionHash,uint8 answerType,bytes answer,uint256 figure,uint64 fromBlock,uint64 toBlock,bytes32 blockHash,bytes32 panelJobId,uint64 issuedAt,uint64 expiresAt)"
     );
     bytes32 private constant EIP712_DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
@@ -19,7 +19,9 @@ contract MilestoneEscrowTest is Test {
         "EscrowTerms(address payer,address payee,address token,uint256 amount,uint64 deadline,uint64 grace,bytes32 questionHash,address oracleSigner,address feeRecipient,uint16 feeBps,uint64 challengeWindow)"
     );
 
-    string constant DOMAIN_NAME = "IMD-Attestation";
+    // Real values, confirmed against IMD's own dedicated attestation endpoint — see
+    // docs/DAY-ONE-FINDINGS.md §25.
+    string constant DOMAIN_NAME = "IdentityMD Oracle";
     string constant DOMAIN_VERSION = "1";
 
     uint256 constant AMOUNT = 1_000e6;
@@ -120,15 +122,16 @@ contract MilestoneEscrowTest is Test {
 
     function _defaultAttestation(bool answer) internal view returns (MilestoneEscrow.Attestation memory) {
         return MilestoneEscrow.Attestation({
-            requestId: 1,
+            requestId: bytes32(uint256(1)),
             chainId: block.chainid,
             questionHash: questionHash,
-            answerType: "bool",
-            answer: answer,
-            figure: "n/a",
+            answerType: 0, // ANSWER_TYPE_BOOL — confirmed live, see docs/DAY-ONE-FINDINGS.md §25
+            answer: abi.encode(answer), // IMD's real "answer" field is ABI-encoded dynamic bytes, not a native bool
+            figure: 0,
             fromBlock: 100,
             toBlock: 200,
-            panelJobId: "panel-1",
+            blockHash: bytes32(uint256(0xb10c)),
+            panelJobId: bytes32(uint256(1)),
             issuedAt: uint64(block.timestamp),
             expiresAt: uint64(block.timestamp + 1 days)
         });
@@ -148,12 +151,13 @@ contract MilestoneEscrowTest is Test {
                 m.requestId,
                 m.chainId,
                 m.questionHash,
-                keccak256(bytes(m.answerType)),
-                m.answer,
-                keccak256(bytes(m.figure)),
+                m.answerType,
+                keccak256(m.answer),
+                m.figure,
                 m.fromBlock,
                 m.toBlock,
-                keccak256(bytes(m.panelJobId)),
+                m.blockHash,
+                m.panelJobId,
                 m.issuedAt,
                 m.expiresAt
             )
@@ -638,7 +642,7 @@ contract MilestoneEscrowTest is Test {
     function test_SubmitAttestation_RevertsOnNonBoolAnswerType() public {
         MilestoneEscrow escrow = _deployDefault();
         MilestoneEscrow.Attestation memory m = _defaultAttestation(true);
-        m.answerType = "int256";
+        m.answerType = 1; // anything other than ANSWER_TYPE_BOOL (0)
         bytes memory sig = _signWith(oraclePk, address(escrow), m);
 
         vm.expectRevert(MilestoneEscrow.BadAnswerType.selector);
@@ -691,7 +695,7 @@ contract MilestoneEscrowTest is Test {
         escrow.release();
 
         MilestoneEscrow.Attestation memory mAgain = _defaultAttestation(true);
-        mAgain.requestId = 2;
+        mAgain.requestId = bytes32(uint256(2));
         bytes memory sigAgain = _signWith(oraclePk, address(escrow), mAgain);
 
         vm.expectRevert(MilestoneEscrow.NotFunded.selector);
@@ -718,7 +722,7 @@ contract MilestoneEscrowTest is Test {
         escrow.submitAttestation(m1, sig1);
 
         MilestoneEscrow.Attestation memory m2 = _defaultAttestation(true);
-        m2.requestId = 2;
+        m2.requestId = bytes32(uint256(2));
         bytes memory sig2 = _signWith(oraclePk, address(escrow), m2);
 
         vm.expectRevert(MilestoneEscrow.AlreadyResolvedTrue.selector);
@@ -793,8 +797,8 @@ contract MilestoneEscrowTest is Test {
 
         // A false with issuedAt <= the true's issuedAt can't override it, even though it's still within the window.
         MilestoneEscrow.Attestation memory mStaleFalse = mTrue;
-        mStaleFalse.answer = false;
-        mStaleFalse.requestId = 2;
+        mStaleFalse.answer = abi.encode(false);
+        mStaleFalse.requestId = bytes32(uint256(2));
         bytes memory sigStaleFalse = _signWith(oraclePk, address(escrow), mStaleFalse);
 
         vm.expectRevert(MilestoneEscrow.StaleAttestation.selector);
@@ -1161,7 +1165,7 @@ contract MilestoneEscrowTest is Test {
         escrow.reclaim();
 
         MilestoneEscrow.Attestation memory m2 = _defaultAttestation(true);
-        m2.requestId = 99;
+        m2.requestId = bytes32(uint256(99));
         bytes memory sig2 = _signWith(oraclePk, address(escrow), m2);
         vm.expectRevert(MilestoneEscrow.NotFunded.selector);
         escrow.submitAttestation(m2, sig2);

@@ -11,13 +11,14 @@ export type { PaymentSigner, PaymentSignature, TypedDataSigner } from "./payment
 export {
   fetchOracleAttestation,
   getOracleStatus,
+  getRealAttestation,
   pollOracleUntilResolved,
   parseSignedAttestation,
-  UnconfirmedOracleResultShapeError,
+  UnsupportedAnswerTypeError,
   OracleDisagreedError,
   OracleStillAssessingError,
 } from "./oracleResult.ts";
-export type { OracleRequestStatus } from "./oracleResult.ts";
+export type { OracleRequestStatus, OracleAttestationResponse } from "./oracleResult.ts";
 export { attestationDomain, ATTESTATION_TYPES } from "./eip712.ts";
 export { loadMilestoneEscrowArtifact } from "./artifact.ts";
 export { loadOrCreateImdToken, loadGithubPublishToken } from "./vaultSecrets.ts";

@@ -1154,20 +1154,65 @@ the gap the README has been flagging as "IMD's real attestation signer address h
 confirmed," except it turns out to be much deeper than an address: the entire verification scheme
 needs to change.
 
-**Not fixed in this pass — this needs a real decision, not a silent rewrite.** Fixing this means: a
-new `MilestoneEscrow.sol` (or a parameterizable version of it) with the corrected domain name,
-struct name, and field types (including the new `blockHash` field this project's struct never had at
-all), a full re-audit of that change, updating every consumer (`server/resolver`'s `eip712.ts` and
-`oracleResult.ts`'s parsing, `site/lib/terms.ts`-adjacent attestation code, every demo script), and
-redeploying — every escrow deployed under the old contract (including the real Base mainnet ones from
-§12/§22) would need a fresh deployment under the corrected version; there's no way to patch an
-already-deployed contract's bytecode. Reported to the user rather than started unilaterally, given the
-scope and that it touches the project's core security-critical contract.
-
 **Spend accounting**: this real request used the project's last practical chunk of `$IMD`
 (0.5916 → 0.0917 remaining) — worth it, since it turned an assumed, never-tested contract scheme into
 a confirmed, precisely-identified, fixable bug instead of a real deal someday failing to settle for a
 reason nobody could diagnose.
+
+**Addendum — fixed, on request, and proven three separate ways.** Reported this finding and asked
+before touching the contract, given the scope (every escrow deployed under the old contract —
+including the real Base mainnet ones from §12/§22 — is unfixable in place; only a fresh deployment
+under the corrected version works). Told to fix it.
+
+`contracts/src/MilestoneEscrow.sol`'s `Attestation` struct, `ATTESTATION_TYPEHASH`, and
+`_hashAttestation()` now match IMD's real scheme exactly: struct name `OracleAttestation`, `requestId`/
+`panelJobId` as `bytes32`, `answerType` as `uint8` (`ANSWER_TYPE_BOOL = 0`, the only value this
+contract ever accepts), `answer` as dynamic `bytes` (decoded via `abi.decode(m.answer, (bool))` right
+after the `answerType` check, before signature verification), `figure` as `uint256`, `fromBlock`/
+`toBlock` as `uint64`, and a new `blockHash` field the struct never had. The constructor's
+`domainName` parameter is unchanged (still caller-supplied), but every caller in this repo now passes
+the real confirmed value, `"IdentityMD Oracle"`, instead of the old assumption. Every TypeScript
+consumer moved in lockstep: `eip712.ts`'s `ATTESTATION_TYPES`, `types.ts`'s `AttestationMessage`
+(`requestId`/`panelJobId`/`blockHash` as `` `0x${string}` ``, `figure` as `bigint`, `answerType` as a
+`number`), `relay.ts`'s `toAbiMessage()` (ABI-encodes the convenience `boolean` into the real dynamic
+`bytes` shape), and `oracleResult.ts` — which itself gained a real, previously-missing capability:
+`getRealAttestation()` calls IMD's dedicated `GET /oracle/requests/:id/attestation` endpoint (the one
+this whole bug went undiscovered because of never being called) instead of guessing the shape from the
+general status endpoint's own `attestation` field, which turns out not to carry enough information to
+actually verify anything on-chain.
+
+**Proof 1 — the exact real captured attestation now verifies, cryptographically.** A new regression
+test, `contracts/test/RealAttestationCheck.t.sol`, hard-codes the real message, signature, and
+domain (`verifyingContract: 0x1234...7890`, the same placeholder used to capture it) from this
+section's real paid request, and asserts two things: the contract's own `hashAttestation()` (a `pure`
+view, real production code, not a test-only reimplementation) produces the exact same struct hash as
+a hand-computed one, and — the real proof — `ECDSA.recover` (the exact same OpenZeppelin function the
+contract calls internally) recovers that digest and the real signature to
+`0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982`, an exact match to IMD's own reported signer. This is
+the strongest proof available without deploying a live contract at that exact address: it confirms the
+*fixed* contract's exact hashing/verification logic accepts a signature IMD *actually produced*, not
+just a self-consistent test fixture.
+
+**Proof 2 — nothing else broke.** All 56 pre-existing contract tests pass unchanged (aside from
+updating fixture values to the new field types) — `56 passed; 0 failed`. All 50 resolver package
+tests pass, including `test/integration.test.ts`'s real Anvil test, which deploys the actual corrected
+bytecode, signs a real EIP-712 `OracleAttestation` with a local test oracle key using the corrected
+domain/types, and relays it through the real deployed contract end to end (submit → wait out the
+challenge window → release → withdraw) — `50 passed; 0 failed`.
+
+**Proof 3 — the full local demo still completes.** `site/scripts/deploy-demo.ts`, re-run for real
+after the fix, deployed a fresh escrow with the corrected constructor args and domain name, signed and
+submitted a corrected-shape attestation, and released it — `Demo deal deployed and released: 0x9fe4...fa6e0` —
+the same one-command local flow this project has used throughout, now producing a contract that
+actually matches IMD's real scheme.
+
+**What's still not proven, and why**: an actual on-chain `submitAttestation()` against a freshly
+deployed *real* contract, using a *brand-new* real IMD attestation obtained after this fix — the
+closing link that would need a live deploy at a specific predicted address plus a fresh paid
+`oracle.request`. Not done here because the real `$IMD` budget was already spent finding and fixing
+this bug (0.09 remaining, well under the 0.5 a real request costs). Proof 1 above is the closest
+practical substitute: it uses IMD's actual real signature over the actual real message, not a
+simulated one, checked against the actual production hashing code path.
 
 ## What's still unconfirmed (needs real signing, so held back)
 

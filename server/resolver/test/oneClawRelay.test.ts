@@ -11,15 +11,16 @@ const ESCROW_ADDRESS = "0x000000000000000000000000000000000000ee" as const;
 function fakeAttestation(): SignedAttestation {
   return {
     message: {
-      requestId: 1n,
+      requestId: "0x1111111111111111111111111111111111111111111111111111111111111111" as `0x${string}`,
       chainId: 1n,
       questionHash: "0x1111111111111111111111111111111111111111111111111111111111111111" as `0x${string}`,
-      answerType: "bool",
+      answerType: 0,
       answer: true,
-      figure: "",
+      figure: 0n,
       fromBlock: 1n,
       toBlock: 2n,
-      panelJobId: "panel-1",
+      blockHash: "0x2222222222222222222222222222222222222222222222222222222222222222" as `0x${string}`,
+      panelJobId: "0x3333333333333333333333333333333333333333333333333333333333333333" as `0x${string}`,
       issuedAt: 1000n,
       expiresAt: 2000n,
     },

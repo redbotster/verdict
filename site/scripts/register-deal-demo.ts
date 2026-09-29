@@ -30,7 +30,7 @@ import { supabaseSelect } from "../lib/supabase.ts";
 const ANVIL_PORT = 8551;
 const RPC_URL = `http://127.0.0.1:${ANVIL_PORT}`;
 const TEST_MNEMONIC = "test test test test test test test test test test test junk";
-const DOMAIN_NAME = "IMD-Attestation";
+const DOMAIN_NAME = "IdentityMD Oracle"; // real value, confirmed — docs/DAY-ONE-FINDINGS.md §25
 const DOMAIN_VERSION = "1";
 
 function loadArtifact(relPath: string): { abi: Abi; bytecode: { object: `0x${string}` } } {

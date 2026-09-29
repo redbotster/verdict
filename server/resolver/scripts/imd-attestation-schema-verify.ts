@@ -1,21 +1,17 @@
-// Closes the §19 evidence gap for real, and checks something more important that was never
-// confirmed at all: docs/SPEC.md (an early planning doc, never verified against reality) describes
-// IMD's real oracle attestation response as EIP-712 typed data with primaryType "OracleAttestation" —
-// but MilestoneEscrow.sol's own on-chain ATTESTATION_TYPEHASH uses the struct name "Attestation", not
-// "OracleAttestation". EIP-712's typeHash is keccak256 of the struct's full type string INCLUDING its
-// name, so if IMD really signs with a different primaryType, no real attestation could ever verify
-// on-chain — a potential blocker deeper than anything §19 flagged, and it's never been checked because
-// the successful response shape has never been captured (oracleResult.ts's own comments say so).
+// Closed the §19 evidence gap for real, and found something much bigger: MilestoneEscrow.sol's
+// on-chain ATTESTATION_TYPEHASH never matched IMD's real EIP-712 signature at all (wrong domain name,
+// wrong struct name, several wrong field types) — see docs/DAY-ONE-FINDINGS.md §25 for the full story.
+// The run that discovered this: one more real paid oracle.request (page_or_file_live, single
+// unambiguous source — the §15 disagreement-avoidance trick), a real deliberate consumer instead of a
+// placeholder, the raw response written to a file immediately (fixing §19's actual capture failure),
+// and — critically — reading IMD's own docs properly to find the dedicated
+// GET /oracle/requests/:id/attestation endpoint this codebase had never called, which returns the
+// real domain/types/primaryType directly.
 //
-// This script: runs one more real paid oracle.request (page_or_file_live, single unambiguous source —
-// the §15 disagreement-avoidance trick that worked in §19), sets a REAL, deliberate consumer
-// (chainId + verifyingContract) instead of a placeholder so the response's domain binding, if any, is
-// to a known value, writes the ENTIRE raw resolved response to a file immediately (§19's own capture
-// failure was an output-truncation issue, not a shape problem), and then independently checks
-// signature validity three ways: (1) using this project's own assumed domain/types
-// (attestationDomain + ATTESTATION_TYPES, i.e. what MilestoneEscrow.sol actually verifies against),
-// (2) using the response's own domain/types/primaryType fields directly, if IMD's response actually
-// includes them, and (3) reports the raw signer field for direct comparison either way.
+// The contract, eip712.ts, types.ts, relay.ts, and oracleResult.ts are all fixed now (§25). This
+// script, re-run after the fix, calls the real dedicated endpoint via getRealAttestation() and
+// confirms the corrected domain/types/primaryType actually recovers to IMD's own reported signer —
+// the same live confirmation that originally found the bug, now proving the fix.
 import { writeFileSync } from "node:fs";
 import { privateKeyToAccount } from "viem/accounts";
 import { recoverTypedDataAddress } from "viem";
@@ -24,7 +20,7 @@ import { withConsumer } from "../../oracle-compiler/src/templates/common.ts";
 import type { Extraction } from "../../oracle-compiler/src/types.ts";
 import { ImdClient, generateClientToken } from "../../imd-client/src/client.ts";
 import { imdPaymentSigner } from "../src/paymentSigner.ts";
-import { pollOracleUntilResolved, parseSignedAttestation, OracleDisagreedError } from "../src/oracleResult.ts";
+import { pollOracleUntilResolved, getRealAttestation, parseSignedAttestation, OracleDisagreedError } from "../src/oracleResult.ts";
 import { attestationDomain, ATTESTATION_TYPES } from "../src/eip712.ts";
 
 const OUT_PATH = "/tmp/imd-attestation-schema-verify-output.json";
@@ -108,50 +104,28 @@ async function main() {
 
   log("7. RAW resolved status (every field IMD actually returned)", status);
 
-  const attestation = parseSignedAttestation(status);
-  log("8. Parsed via this project's assumed shape", attestation);
+  // The general status endpoint's own `attestation`/`signature`/`signer` fields are NOT the real
+  // signing package (no domain/types/primaryType, and `answerType` is a display string, not the
+  // numeric value actually signed) — this is exactly what this script's real run discovered. The
+  // dedicated endpoint below is the authoritative source; getRealAttestation()/parseSignedAttestation()
+  // now encode that fix directly (see docs/DAY-ONE-FINDINGS.md §25).
+  const real = await getRealAttestation(admissionResult);
+  log("8. REAL signing package, from IMD's dedicated attestation endpoint", real);
 
-  console.log("\n=== 9. Signature verification ===");
-  console.log("IMD's own reported signer field:", status.signer);
+  const attestation = parseSignedAttestation(real);
+  log("9. Parsed via this project's NOW-CORRECTED shape", attestation);
 
-  // Check 1: does the signature verify against THIS PROJECT'S assumed domain/types — i.e. what
-  // MilestoneEscrow.sol itself would actually check on-chain?
-  try {
-    const recoveredOurScheme = await recoverTypedDataAddress({
-      domain: attestationDomain(TEST_CHAIN_ID, TEST_VERIFYING_CONTRACT, "IMD-Attestation", "1"),
-      types: ATTESTATION_TYPES,
-      primaryType: "Attestation",
-      message: attestation.message,
-      signature: attestation.signature,
-    });
-    console.log("Recovered using OUR assumed domain/types (name=IMD-Attestation, primaryType=Attestation):", recoveredOurScheme);
-    console.log("MATCHES status.signer:", recoveredOurScheme.toLowerCase() === String(status.signer).toLowerCase());
-  } catch (err) {
-    console.log("Recovery using our assumed scheme FAILED:", err instanceof Error ? err.message : String(err));
-  }
-
-  // Check 2: does the raw response actually include its own domain/types/primaryType (per
-  // docs/SPEC.md's description)? If so, recover using THOSE exact values instead of our assumption.
-  const rawAny = status as unknown as Record<string, unknown>;
-  if (rawAny.domain && rawAny.types && rawAny.primaryType) {
-    console.log("\nResponse DOES include its own domain/types/primaryType — using those directly:");
-    console.log(JSON.stringify({ domain: rawAny.domain, primaryType: rawAny.primaryType }, null, 2));
-    try {
-      const recoveredRealScheme = await recoverTypedDataAddress({
-        domain: rawAny.domain,
-        types: rawAny.types,
-        primaryType: rawAny.primaryType,
-        message: rawAny.message ?? status.attestation,
-        signature: attestation.signature,
-      } as Parameters<typeof recoverTypedDataAddress>[0]);
-      console.log("Recovered using IMD's OWN reported domain/types/primaryType:", recoveredRealScheme);
-      console.log("MATCHES status.signer:", recoveredRealScheme.toLowerCase() === String(status.signer).toLowerCase());
-    } catch (err) {
-      console.log("Recovery using IMD's own reported scheme FAILED:", err instanceof Error ? err.message : String(err));
-    }
-  } else {
-    console.log("\nResponse does NOT include its own domain/types/primaryType fields at the top level — see the raw dump above for the actual keys present.");
-  }
+  console.log("\n=== 10. Signature verification against the now-fixed contract scheme ===");
+  console.log("IMD's own reported signer field:", real.signer);
+  const recovered = await recoverTypedDataAddress({
+    domain: attestationDomain(TEST_CHAIN_ID, TEST_VERIFYING_CONTRACT, "IdentityMD Oracle", "1"),
+    types: ATTESTATION_TYPES,
+    primaryType: "OracleAttestation",
+    message: { ...real.message, chainId: BigInt(real.message.chainId), answerType: 0, figure: BigInt(real.message.figure), fromBlock: BigInt(real.message.fromBlock), toBlock: BigInt(real.message.toBlock), issuedAt: BigInt(real.message.issuedAt), expiresAt: BigInt(real.message.expiresAt) },
+    signature: attestation.signature,
+  });
+  console.log("Recovered using the corrected domain/types (name=IdentityMD Oracle, primaryType=OracleAttestation):", recovered);
+  console.log("MATCHES signer:", recovered.toLowerCase() === real.signer.toLowerCase());
 }
 
 main().catch((err) => {

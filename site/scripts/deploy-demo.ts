@@ -75,7 +75,7 @@ async function main() {
   const REPO = "acme/widget";
   const QUESTION = `Did ${REPO} publish a non-prerelease GitHub release between now and the deadline?`;
   const QUESTION_HASH = keccak256(toHex(QUESTION));
-  const DOMAIN_NAME = "IMD-Attestation";
+  const DOMAIN_NAME = "IdentityMD Oracle"; // real value, confirmed — docs/DAY-ONE-FINDINGS.md §25
   const DOMAIN_VERSION = "1";
 
   const TERMS_TYPEHASH = keccak256(
@@ -99,38 +99,41 @@ async function main() {
   const escrowAddress = (await publicClient.waitForTransactionReceipt({ hash: escrowDeployHash })).contractAddress!;
 
   // Settle it to Released, so the demo page has something more interesting than "Funded" to show.
+  // Real field shapes and struct/domain name confirmed live — docs/DAY-ONE-FINDINGS.md §25.
   const ATTESTATION_TYPES = {
-    Attestation: [
-      { name: "requestId", type: "uint256" },
+    OracleAttestation: [
+      { name: "requestId", type: "bytes32" },
       { name: "chainId", type: "uint256" },
       { name: "questionHash", type: "bytes32" },
-      { name: "answerType", type: "string" },
-      { name: "answer", type: "bool" },
-      { name: "figure", type: "string" },
-      { name: "fromBlock", type: "uint256" },
-      { name: "toBlock", type: "uint256" },
-      { name: "panelJobId", type: "string" },
+      { name: "answerType", type: "uint8" },
+      { name: "answer", type: "bytes" },
+      { name: "figure", type: "uint256" },
+      { name: "fromBlock", type: "uint64" },
+      { name: "toBlock", type: "uint64" },
+      { name: "blockHash", type: "bytes32" },
+      { name: "panelJobId", type: "bytes32" },
       { name: "issuedAt", type: "uint64" },
       { name: "expiresAt", type: "uint64" },
     ],
   } as const;
   const message = {
-    requestId: 1n,
+    requestId: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
     chainId: 31337n,
     questionHash: QUESTION_HASH,
-    answerType: "bool",
-    answer: true,
-    figure: "",
+    answerType: 0,
+    answer: encodeAbiParameters([{ type: "bool" }], [true]),
+    figure: 0n,
     fromBlock: 1n,
     toBlock: 2n,
-    panelJobId: "panel-1",
+    blockHash: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`,
+    panelJobId: "0x0000000000000000000000000000000000000000000000000000000000000002" as `0x${string}`,
     issuedAt: now,
     expiresAt: now + 3600n,
   };
   const signature = await oracle.signTypedData({
     domain: { name: DOMAIN_NAME, version: DOMAIN_VERSION, chainId: 31337, verifyingContract: escrowAddress },
     types: ATTESTATION_TYPES,
-    primaryType: "Attestation",
+    primaryType: "OracleAttestation",
     message,
   });
   const submitHash = await walletFor(deployer).writeContract({ address: escrowAddress, abi: escrowArtifact.abi, functionName: "submitAttestation", args: [message, signature] });

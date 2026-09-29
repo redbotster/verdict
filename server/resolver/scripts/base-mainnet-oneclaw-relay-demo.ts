@@ -22,7 +22,7 @@
 //   ONE_CLAW_EXTRACTION_AGENT_API_KEY=$(grep -oP '(?<=^ONE_CLAW_EXTRACTION_AGENT_API_KEY=).*' ~/.secrets/verdict.env) \
 //   DRPC_API_KEY=$(grep -oP '(?<=^DRPC_API_KEY=).*' ~/.secrets/verdict.env) \
 //     npx tsx scripts/base-mainnet-oneclaw-relay-demo.ts
-import { createPublicClient, createWalletClient, http, keccak256, toHex, encodeAbiParameters, getContractAddress, parseAbi } from "viem";
+import { createPublicClient, createWalletClient, http, keccak256, toHex, encodeAbiParameters, getContractAddress, parseAbi, zeroHash } from "viem";
 import type { Account, Chain, Hash, PublicClient, Transport, WalletClient } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { base } from "viem/chains";
@@ -36,7 +36,7 @@ import { OneClawClient } from "../../oneclaw-client/src/client.ts";
 import { attestationDomain, ATTESTATION_TYPES } from "../src/eip712.ts";
 
 const RPC_URL = `https://lb.drpc.org/ogrpc?network=base&dkey=${process.env.DRPC_API_KEY}`;
-const DOMAIN_NAME = "IMD-Attestation";
+const DOMAIN_NAME = "IdentityMD Oracle"; // real value, confirmed against IMD's own attestation endpoint — docs/DAY-ONE-FINDINGS.md §25
 const DOMAIN_VERSION = "1";
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 const ONECLAW_SIGNER_ADDRESS = "0x2590fc6823ede90dbebac41bb5759c14555e6aab" as const; // this agent's real ethereum signing key
@@ -156,24 +156,28 @@ async function main() {
   // --- Step 4: sign a real true attestation, relay it through 1Claw's real transaction endpoint ---
   const attestBlock = await publicClient.getBlock();
   const nowAtAttest = attestBlock.timestamp;
+  // Real field shapes confirmed live — docs/DAY-ONE-FINDINGS.md §25. signTypedData needs `answer`
+  // ABI-encoded (the real wire shape); submitAttestation() takes the boolean convenience shape and
+  // encodes it internally via relay.ts's toAbiMessage().
   const message = {
-    requestId: 1n,
+    requestId: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
     chainId: 8453n,
     questionHash,
-    answerType: "bool",
+    answerType: 0,
     answer: true,
-    figure: "",
+    figure: 0n,
     fromBlock: 1n,
     toBlock: 2n,
-    panelJobId: "oneclaw-relay-demo",
+    blockHash: zeroHash,
+    panelJobId: "0x0000000000000000000000000000000000000000000000000000000000000002" as `0x${string}`,
     issuedAt: nowAtAttest,
     expiresAt: nowAtAttest + 3600n,
   };
   const signature = await oracle.signTypedData({
     domain: attestationDomain(8453, escrowAddress, DOMAIN_NAME, DOMAIN_VERSION),
     types: ATTESTATION_TYPES,
-    primaryType: "Attestation",
-    message,
+    primaryType: "OracleAttestation",
+    message: { ...message, answer: encodeAbiParameters([{ type: "bool" }], [message.answer]) },
   });
   const submitHash = await relay.submitAttestation(escrowAddress, { message, signature });
   await mustSucceed(submitHash, "submitAttestation (via 1Claw)");

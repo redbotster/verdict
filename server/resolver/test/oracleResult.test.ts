@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { encodeAbiParameters } from "viem";
 import {
   getOracleStatus,
   pollOracleUntilResolved,
@@ -7,8 +8,9 @@ import {
   fetchOracleAttestation,
   OracleDisagreedError,
   OracleStillAssessingError,
-  UnconfirmedOracleResultShapeError,
+  UnsupportedAnswerTypeError,
   type OracleRequestStatus,
+  type OracleAttestationResponse,
 } from "../src/oracleResult.ts";
 
 const ADMISSION_RESULT = {
@@ -46,26 +48,46 @@ function disagreedStatus(): OracleRequestStatus {
   };
 }
 
+// The status endpoint just needs non-null attestation/signature/signer to signal "ready" to
+// pollOracleUntilResolved — the real content used to build a SignedAttestation now comes from
+// getRealAttestation()'s dedicated endpoint instead (see realAttestation() below).
 function resolvedStatus(): OracleRequestStatus {
   return {
     ...assessingStatus(),
-    status: "resolved",
+    status: "attested",
     attestedAt: "2026-09-29T16:00:00.000Z",
-    signer: "0x000000000000000000000000000000000000dEaD",
+    signer: "0x5598aa9146215bc13eb26f2c692ad1461fd32982",
     signature: "0xdeadbeef",
-    attestation: {
-      requestId: 1,
+    attestation: { placeholder: true },
+  };
+}
+
+// Shape and field values match the real response captured live 2026-09-29 from IMD's dedicated
+// GET /oracle/requests/:id/attestation endpoint — see docs/DAY-ONE-FINDINGS.md §25.
+function realAttestation(overrides: Partial<OracleAttestationResponse["message"]> = {}): OracleAttestationResponse {
+  return {
+    requestId: "b3184afe-f7b7-4038-87f3-8737dc29f16d",
+    domain: { name: "IdentityMD Oracle", version: "1", chainId: 1, verifyingContract: "0x1234567890123456789012345678901234567890" },
+    types: { OracleAttestation: [] },
+    primaryType: "OracleAttestation",
+    message: {
+      requestId: "0x52523387b5be49339932634f90e2dc3000000000000000000000000000000000" as `0x${string}`,
       chainId: 1,
-      questionHash: "0x4cac90cb903813abf60a01e873357236901901e026bff048d041fdb609565cb5",
+      questionHash: "0xa34745703a3601fbca040a13ea8926f8f8e0752f58ce955f3b43e3651fa18a91",
       answerType: "bool",
-      answer: true,
-      figure: "",
-      fromBlock: 26076682,
-      toBlock: 26084152,
-      panelJobId: "605aeecc-4f7b-4e60-bb66-e2232a5e433a",
-      issuedAt: 1790697940,
-      expiresAt: 1790698840,
+      answer: encodeAbiParameters([{ type: "bool" }], [true]),
+      figure: "0",
+      fromBlock: 26078576,
+      toBlock: 26086048,
+      blockHash: "0x75592d9457551014314a3fe70ea934406dc680bd9e26d6d30361812e1ab93210",
+      panelJobId: "0xd57e7d7838d54b6193e97192ff7909dd00000000000000000000000000000000" as `0x${string}`,
+      issuedAt: 1790720297,
+      expiresAt: 1791325097,
+      ...overrides,
     },
+    signature: "0x56ad79550bcfe2e08e453819f60873340e9ae2134c2222a65f7ff2546cc49e5249dcbd1dfb4fd3804cd936c9a1f56164aebbf6707ea07d0f315a0d49cf6fde511b",
+    signer: "0x5598aa9146215bc13eb26f2c692ad1461fd32982",
+    attestedAt: "2026-09-29T22:18:17.348Z",
   };
 }
 
@@ -108,7 +130,7 @@ test("pollOracleUntilResolved: throws OracleDisagreedError immediately on a real
 test("pollOracleUntilResolved: keeps polling through assessing, then returns once resolved", async () => {
   const fetchImpl = fakeFetch([assessingStatus(), assessingStatus(), resolvedStatus()]);
   const status = await pollOracleUntilResolved(ADMISSION_RESULT, { fetchImpl, intervalMs: 1 });
-  assert.equal(status.status, "resolved");
+  assert.equal(status.status, "attested");
   assert.equal(status.signature, "0xdeadbeef");
 });
 
@@ -120,23 +142,31 @@ test("pollOracleUntilResolved: throws OracleStillAssessingError once the timeout
   );
 });
 
-test("parseSignedAttestation: parses a well-formed resolved status into a SignedAttestation", () => {
-  const attestation = parseSignedAttestation(resolvedStatus());
-  assert.equal(attestation.signature, "0xdeadbeef");
+test("parseSignedAttestation: parses the real dedicated attestation-endpoint shape into a SignedAttestation", () => {
+  const attestation = parseSignedAttestation(realAttestation());
+  assert.equal(attestation.signature, "0x56ad79550bcfe2e08e453819f60873340e9ae2134c2222a65f7ff2546cc49e5249dcbd1dfb4fd3804cd936c9a1f56164aebbf6707ea07d0f315a0d49cf6fde511b");
   assert.equal(attestation.message.answer, true);
-  assert.equal(attestation.message.requestId, 1n);
-  assert.equal(attestation.message.fromBlock, 26076682n);
-  assert.equal(attestation.message.panelJobId, "605aeecc-4f7b-4e60-bb66-e2232a5e433a");
+  assert.equal(attestation.message.answerType, 0);
+  assert.equal(attestation.message.requestId, "0x52523387b5be49339932634f90e2dc3000000000000000000000000000000000");
+  assert.equal(attestation.message.fromBlock, 26078576n);
+  assert.equal(attestation.message.figure, 0n);
+  assert.equal(attestation.message.blockHash, "0x75592d9457551014314a3fe70ea934406dc680bd9e26d6d30361812e1ab93210");
+  assert.equal(attestation.message.panelJobId, "0xd57e7d7838d54b6193e97192ff7909dd00000000000000000000000000000000");
 });
 
-test("parseSignedAttestation: throws UnconfirmedOracleResultShapeError when attestation is missing", () => {
-  assert.throws(() => parseSignedAttestation(assessingStatus()), UnconfirmedOracleResultShapeError);
+test("parseSignedAttestation: a false answer decodes correctly too", () => {
+  const attestation = parseSignedAttestation(realAttestation({ answer: encodeAbiParameters([{ type: "bool" }], [false]) }));
+  assert.equal(attestation.message.answer, false);
 });
 
-test("fetchOracleAttestation: end to end, polls then parses", async () => {
-  const fetchImpl = fakeFetch([assessingStatus(), resolvedStatus()]);
+test("parseSignedAttestation: throws UnsupportedAnswerTypeError for anything other than bool", () => {
+  assert.throws(() => parseSignedAttestation(realAttestation({ answerType: "uint256" })), UnsupportedAnswerTypeError);
+});
+
+test("fetchOracleAttestation: end to end, polls the status endpoint then fetches and parses the real attestation", async () => {
+  const fetchImpl = fakeFetch([assessingStatus(), resolvedStatus(), realAttestation()]);
   const attestation = await fetchOracleAttestation(ADMISSION_RESULT, { fetchImpl, intervalMs: 1 });
-  assert.equal(attestation.signature, "0xdeadbeef");
+  assert.equal(attestation.message.answer, true);
 });
 
 test("fetchOracleAttestation: propagates OracleDisagreedError rather than misreporting it as a parse failure", async () => {

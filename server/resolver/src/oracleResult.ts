@@ -1,13 +1,15 @@
+import { decodeAbiParameters } from "viem";
 import { BASE_URL } from "../../imd-client/src/client.ts";
 import type { SignedAttestation } from "./types.ts";
 
-// Real shape, confirmed 2026-09-29 against a real paid oracle.request (docs/DAY-ONE-FINDINGS.md
-// §14-15) — GET /oracle/requests/:id, no auth required. Two states are now confirmed:
-// "assessing" (still being worked) and "disagreed" (a real, observed terminal failure — every
-// panelist can give the same answer and it still disagrees, if their cited sources don't cluster;
-// see §15). The *successful* shape — what attestation/signature/signer actually look like once
-// populated — has never been observed, since the one real request run so far disagreed instead of
-// reaching quorum. Best-effort parsed below, clearly marked as such.
+// Real shape, confirmed 2026-09-29 against real paid oracle.requests (docs/DAY-ONE-FINDINGS.md
+// §14-15, §25) — GET /oracle/requests/:id, no auth required. Three states confirmed: "assessing"
+// (still being worked), "disagreed" (a real, observed terminal failure — every panelist can give the
+// same answer and it still disagrees, if their cited sources don't cluster; see §15), and "attested"
+// (a real quorum reached — see §19, §25). This endpoint's own `attestation`/`signature`/`signer`
+// fields are enough to know an attestation exists, but NOT enough to actually verify or submit
+// it on-chain — see getRealAttestation() below for why, and docs/DAY-ONE-FINDINGS.md §25 for the
+// full story of finding this out the hard way.
 export interface OracleRequestStatus {
   id: string;
   status: string;
@@ -23,13 +25,44 @@ export interface OracleRequestStatus {
   [key: string]: unknown;
 }
 
-export class UnconfirmedOracleResultShapeError extends Error {
-  constructor(context: string, raw: unknown) {
+// The REAL EIP-712 signing package — confirmed live 2026-09-29 via IMD's own dedicated endpoint,
+// GET /oracle/requests/:id/attestation (404 "not_attested" until signed). This is the only source of
+// the actual domain/types/primaryType IMD signed with; OracleRequestStatus's own `attestation` field
+// looks similar but is missing the domain/types/primaryType entirely, and its `message.answerType`
+// is a human-readable string ("bool") rather than the numeric enum the real signature actually
+// commits to. See docs/DAY-ONE-FINDINGS.md §25 for the real values and how they were verified
+// (independently recovering a real signature and matching IMD's own reported signer).
+export interface OracleAttestationResponse {
+  requestId: string;
+  domain: { name: string; version: string; chainId: number; verifyingContract: `0x${string}` };
+  types: Record<string, { name: string; type: string }[]>;
+  primaryType: string;
+  message: {
+    requestId: `0x${string}`;
+    chainId: number;
+    questionHash: `0x${string}`;
+    answerType: string; // human-readable ("bool", per the enum's zero value — confirmed live), NOT the numeric value actually signed
+    answer: `0x${string}`; // ABI-encoded dynamic bytes, e.g. a bool encodes to 32 bytes, 0 or 1
+    figure: string; // decimal string
+    fromBlock: number;
+    toBlock: number;
+    blockHash: `0x${string}`;
+    panelJobId: `0x${string}`;
+    issuedAt: number;
+    expiresAt: number;
+  };
+  signature: `0x${string}`;
+  signer: `0x${string}`;
+  attestedAt: string;
+}
+
+export class UnsupportedAnswerTypeError extends Error {
+  constructor(answerType: string) {
     super(
-      `Could not parse a SignedAttestation from IMD's oracle status (${context}) — the successful ` +
-        `response shape has never been observed against a real request. Raw: ${JSON.stringify(raw)}`,
+      `IMD's real attestation reports answerType "${answerType}" — this project's contract (and this ` +
+        `parsing code) only ever supports "bool". See docs/DAY-ONE-FINDINGS.md §25.`,
     );
-    this.name = "UnconfirmedOracleResultShapeError";
+    this.name = "UnsupportedAnswerTypeError";
   }
 }
 
@@ -57,10 +90,19 @@ export class OracleStillAssessingError extends Error {
   }
 }
 
-function oracleStatusUrl(admissionResult: Record<string, unknown>): string {
-  const path = (admissionResult["statusUrl"] ?? admissionResult["url"]) as unknown;
-  if (typeof path !== "string") throw new Error("admission.result has no statusUrl/url for the oracle request");
+function resolveUrl(path: unknown, label: string): string {
+  if (typeof path !== "string") throw new Error(`admission.result has no ${label} for the oracle request`);
   return path.startsWith("http") ? path : `${BASE_URL}${path}`;
+}
+
+function oracleStatusUrl(admissionResult: Record<string, unknown>): string {
+  return resolveUrl(admissionResult["statusUrl"] ?? admissionResult["url"], "statusUrl/url");
+}
+
+// oracle.request's admission result includes this directly (confirmed live, docs.imd.fun) — no need
+// to derive it from the request id by hand.
+function oracleAttestationUrl(admissionResult: Record<string, unknown>): string {
+  return resolveUrl(admissionResult["attestationUrl"], "attestationUrl");
 }
 
 // One check, no polling — throws OracleDisagreedError or OracleStillAssessingError for those exact
@@ -70,6 +112,15 @@ export async function getOracleStatus(admissionResult: Record<string, unknown>, 
   const res = await fetchImpl(oracleStatusUrl(admissionResult));
   if (!res.ok) throw new Error(`GET oracle status failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as OracleRequestStatus;
+}
+
+// The actual signing package to verify/submit on-chain — see OracleAttestationResponse's own comment
+// for why this, not OracleRequestStatus's `attestation` field, is the real source of truth. 404s with
+// "not_attested" until the status endpoint reports attestation/signature/signer are all non-null.
+export async function getRealAttestation(admissionResult: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<OracleAttestationResponse> {
+  const res = await fetchImpl(oracleAttestationUrl(admissionResult));
+  if (!res.ok) throw new Error(`GET oracle attestation failed: ${res.status} ${await res.text()}`);
+  return (await res.json()) as OracleAttestationResponse;
 }
 
 // Polls until the oracle panel reaches a terminal state. Panel assessment takes real wall-clock
@@ -94,40 +145,41 @@ export async function pollOracleUntilResolved(
   }
 }
 
-// Best-effort parse of the still-unconfirmed successful shape: assumes `attestation` holds the same
-// fields as the contract's Attestation struct (matching ATTESTATION_TYPES in eip712.ts), since
-// that's what a signature over it would need to mean to be useful — not confirmed against a real
-// resolved request. A parse failure here is informative, not proof the rest of the resolver is
-// broken; see UnconfirmedOracleResultShapeError.
-export function parseSignedAttestation(status: OracleRequestStatus): SignedAttestation {
-  const m = status.attestation;
-  const signature = status.signature;
-  if (!m || typeof signature !== "string") {
-    throw new UnconfirmedOracleResultShapeError("attestation/signature missing on a status without disagreement", status);
-  }
+// Parses IMD's real, dedicated attestation-endpoint response (not the general status endpoint's own
+// `attestation` field — see OracleAttestationResponse's comment) into this project's convenience
+// shape. `answerType`/`answer` are IMD's real wire values (a human-readable string and ABI-encoded
+// dynamic bytes, respectively, both confirmed live — docs/DAY-ONE-FINDINGS.md §25); this contract
+// only ever supports "bool", so anything else throws rather than silently misinterpreting an answer
+// this project was never built to handle.
+export function parseSignedAttestation(real: OracleAttestationResponse): SignedAttestation {
+  if (real.message.answerType !== "bool") throw new UnsupportedAnswerTypeError(real.message.answerType);
+  const [answer] = decodeAbiParameters([{ type: "bool" }], real.message.answer);
   return {
     message: {
-      requestId: BigInt((m["requestId"] as string | number | undefined) ?? 0),
-      chainId: BigInt((m["chainId"] as string | number | undefined) ?? status.chainId),
-      questionHash: (m["questionHash"] as `0x${string}` | undefined) ?? status.questionHash,
-      answerType: String(m["answerType"] ?? "bool"),
-      answer: Boolean(m["answer"]),
-      figure: String(m["figure"] ?? ""),
-      fromBlock: BigInt((m["fromBlock"] as string | number | undefined) ?? 0),
-      toBlock: BigInt((m["toBlock"] as string | number | undefined) ?? 0),
-      panelJobId: String(m["panelJobId"] ?? status["jobId"] ?? ""),
-      issuedAt: BigInt((m["issuedAt"] as string | number | undefined) ?? 0),
-      expiresAt: BigInt((m["expiresAt"] as string | number | undefined) ?? 0),
+      requestId: real.message.requestId,
+      chainId: BigInt(real.message.chainId),
+      questionHash: real.message.questionHash,
+      answerType: 0, // ANSWER_TYPE_BOOL — the only value MilestoneEscrow.sol accepts, confirmed live
+      answer,
+      figure: BigInt(real.message.figure),
+      fromBlock: BigInt(real.message.fromBlock),
+      toBlock: BigInt(real.message.toBlock),
+      blockHash: real.message.blockHash,
+      panelJobId: real.message.panelJobId,
+      issuedAt: BigInt(real.message.issuedAt),
+      expiresAt: BigInt(real.message.expiresAt),
     },
-    signature: signature as `0x${string}`,
+    signature: real.signature,
   };
 }
 
-// Convenience: poll to a terminal state, then parse. What resolve.ts should actually call.
+// Convenience: poll the status endpoint to a terminal state, then fetch the real signing package
+// from the dedicated attestation endpoint and parse it. What resolve.ts actually calls.
 export async function fetchOracleAttestation(
   admissionResult: Record<string, unknown>,
   opts?: { intervalMs?: number; timeoutMs?: number; fetchImpl?: typeof fetch },
 ): Promise<SignedAttestation> {
-  const status = await pollOracleUntilResolved(admissionResult, opts);
-  return parseSignedAttestation(status);
+  await pollOracleUntilResolved(admissionResult, opts);
+  const real = await getRealAttestation(admissionResult, opts?.fetchImpl);
+  return parseSignedAttestation(real);
 }

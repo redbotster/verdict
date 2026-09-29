@@ -18,23 +18,37 @@ contract MilestoneEscrow is EIP712 {
         Refunded
     }
 
-    // Domain name/version and full field ordering are NOT yet verified against a live IMD attestation.
+    // Struct shape, field types, the EIP-712 struct name, and the domain name (see the constructor's
+    // domainName param and site/app/new's "IdentityMD Oracle" default) are all confirmed for real
+    // against IMD's own dedicated GET /oracle/requests/:id/attestation endpoint, 2026-09-29 (see
+    // docs/DAY-ONE-FINDINGS.md §25) — independently verified by recovering a real attestation's
+    // signer with this exact scheme and matching IMD's own reported signer field. The prior version
+    // of this struct (uint256 requestId, string answerType, bool answer, string figure, uint256
+    // fromBlock/toBlock, string panelJobId, no blockHash) was never actually checked against a real
+    // IMD signature and turned out to not match at all.
     struct Attestation {
-        uint256 requestId;
+        bytes32 requestId;
         uint256 chainId;
         bytes32 questionHash;
-        string answerType;
-        bool answer;
-        string figure;
-        uint256 fromBlock;
-        uint256 toBlock;
-        string panelJobId;
+        uint8 answerType;
+        bytes answer;
+        uint256 figure;
+        uint64 fromBlock;
+        uint64 toBlock;
+        bytes32 blockHash;
+        bytes32 panelJobId;
         uint64 issuedAt;
         uint64 expiresAt;
     }
 
+    // Confirmed live: `answerType == 0` decodes to IMD's own "bool" answer type (recovering the real
+    // signer only worked with this value, out of all 6 in IMD's documented enum order — bool,
+    // address, bytes32, uint256, address[], bytes32[]). This contract only ever supports a bool
+    // answer (matches its pre-existing behavior), so this is the only value ever accepted.
+    uint8 private constant ANSWER_TYPE_BOOL = 0;
+
     bytes32 private constant ATTESTATION_TYPEHASH = keccak256(
-        "Attestation(uint256 requestId,uint256 chainId,bytes32 questionHash,string answerType,bool answer,string figure,uint256 fromBlock,uint256 toBlock,string panelJobId,uint64 issuedAt,uint64 expiresAt)"
+        "OracleAttestation(bytes32 requestId,uint256 chainId,bytes32 questionHash,uint8 answerType,bytes answer,uint256 figure,uint64 fromBlock,uint64 toBlock,bytes32 blockHash,bytes32 panelJobId,uint64 issuedAt,uint64 expiresAt)"
     );
 
     uint16 public constant MAX_FEE_BPS = 200;
@@ -61,8 +75,8 @@ contract MilestoneEscrow is EIP712 {
     uint64 public lastIssuedAt;
     mapping(address => uint256) public owed;
 
-    event TrueAttested(uint256 indexed requestId, uint256 trueAt);
-    event TrueOverridden(uint256 requestId, uint256 trueAt);
+    event TrueAttested(bytes32 indexed requestId, uint256 trueAt);
+    event TrueOverridden(bytes32 requestId, uint256 trueAt);
     event Released(uint256 payeeAmount, uint256 feeAmount);
     event Refunded(uint256 amount);
     event Withdrawn(address indexed account, address indexed to, uint256 amount);
@@ -176,8 +190,14 @@ contract MilestoneEscrow is EIP712 {
     // A second `true`, or any attestation once the window has closed, cannot change a resolved true.
     function submitAttestation(Attestation calldata m, bytes calldata sig) external {
         if (state != State.Funded) revert NotFunded();
-        _checkChallengeable(m.answer);
-        _checkAttestationTiming(m);
+        if (m.answerType != ANSWER_TYPE_BOOL) revert BadAnswerType();
+        // `answer` is dynamic `bytes` in IMD's real scheme (ABI-encoded bool: 32 bytes, 0 or 1) —
+        // decoded once here, before signature verification, so a garbage-shaped answer reverts
+        // cheaply rather than reaching ECDSA.recover; either way nothing moves until the signer
+        // checks out below.
+        bool answer = abi.decode(m.answer, (bool));
+        _checkChallengeable(answer);
+        _checkAttestationTiming(m, answer);
 
         bytes32 digest = _hashTypedDataV4(_hashAttestation(m));
         address signer = ECDSA.recover(digest, sig);
@@ -185,7 +205,7 @@ contract MilestoneEscrow is EIP712 {
 
         lastIssuedAt = m.issuedAt;
 
-        if (m.answer) {
+        if (answer) {
             trueAt = block.timestamp;
             emit TrueAttested(m.requestId, trueAt);
         } else {
@@ -205,10 +225,9 @@ contract MilestoneEscrow is EIP712 {
         if (block.timestamp >= trueAt + challengeWindow) revert AlreadyResolvedTrue();
     }
 
-    function _checkAttestationTiming(Attestation calldata m) private view {
+    function _checkAttestationTiming(Attestation calldata m, bool answer) private view {
         if (m.chainId != block.chainid) revert BadChainId();
         if (m.questionHash != questionHash) revert BadQuestionHash();
-        if (keccak256(bytes(m.answerType)) != keccak256(bytes("bool"))) revert BadAnswerType();
         if (block.timestamp > m.expiresAt) revert Expired();
         if (m.issuedAt > block.timestamp) revert BadIssuedAt();
         // rejects any answer older than (or equal to) the one already accepted, so a stale or replayed
@@ -218,7 +237,7 @@ contract MilestoneEscrow is EIP712 {
         if (block.timestamp > uint256(deadline) + uint256(grace)) revert TooLate();
         // "not done as of an early check" is not proof of failure — only a false evaluated at or after
         // the deadline can settle the deal; an earlier one would end it before the payee had their full window
-        if (!m.answer && m.issuedAt < deadline) revert PrematureFalse();
+        if (!answer && m.issuedAt < deadline) revert PrematureFalse();
     }
 
     function release() external {
@@ -274,12 +293,13 @@ contract MilestoneEscrow is EIP712 {
                 m.requestId,
                 m.chainId,
                 m.questionHash,
-                keccak256(bytes(m.answerType)),
-                m.answer,
-                keccak256(bytes(m.figure)),
+                m.answerType,
+                keccak256(m.answer),
+                m.figure,
                 m.fromBlock,
                 m.toBlock,
-                keccak256(bytes(m.panelJobId)),
+                m.blockHash,
+                m.panelJobId,
                 m.issuedAt,
                 m.expiresAt
             )

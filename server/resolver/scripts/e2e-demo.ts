@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, createWalletClient, http, keccak256, toHex, encodeAbiParameters, getContractAddress, type Abi } from "viem";
+import { createPublicClient, createWalletClient, http, keccak256, toHex, encodeAbiParameters, getContractAddress, zeroHash, type Abi } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
@@ -37,7 +37,7 @@ import { attestationDomain, ATTESTATION_TYPES } from "../src/eip712.ts";
 const ANVIL_PORT = 8549;
 const RPC_URL = `http://127.0.0.1:${ANVIL_PORT}`;
 const TEST_MNEMONIC = "test test test test test test test test test test test junk";
-const DOMAIN_NAME = "IMD-Attestation";
+const DOMAIN_NAME = "IdentityMD Oracle"; // real value, confirmed against IMD's own attestation endpoint — docs/DAY-ONE-FINDINGS.md §25
 const DOMAIN_VERSION = "1";
 
 function loadArtifact(relPath: string): { abi: Abi; bytecode: { object: `0x${string}` } } {
@@ -156,24 +156,29 @@ async function main() {
   log("3. pinQuestion() — real IMD quote with the real consumer", { orderId: pinnedOrder.id, orderStatus: pinnedOrder.status });
 
   // --- Step 4: resolveDeal(), faking only the paid oracle-attestation step ---
+  // `message` is this package's convenience shape (boolean `answer`) — resolveDeal()/relay.ts's
+  // toAbiMessage() encode it into the real wire shape internally. signTypedData needs that real wire
+  // shape directly, so `answer` is ABI-encoded separately just for the signing call. Real field
+  // shapes confirmed live — docs/DAY-ONE-FINDINGS.md §25.
   const message = {
-    requestId: 1n,
+    requestId: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
     chainId: 31337n,
     questionHash,
-    answerType: "bool",
+    answerType: 0,
     answer: true,
-    figure: "",
+    figure: 0n,
     fromBlock: 1n,
     toBlock: 2n,
-    panelJobId: "panel-1",
+    blockHash: zeroHash,
+    panelJobId: "0x0000000000000000000000000000000000000000000000000000000000000002" as `0x${string}`,
     issuedAt: now,
     expiresAt: now + 3600n,
   };
   const signature = await oracle.signTypedData({
     domain: attestationDomain(31337, escrowAddress, DOMAIN_NAME, DOMAIN_VERSION),
     types: ATTESTATION_TYPES,
-    primaryType: "Attestation",
-    message,
+    primaryType: "OracleAttestation",
+    message: { ...message, answer: encodeAbiParameters([{ type: "bool" }], [message.answer]) },
   });
 
   const resolveResult = await resolveDeal(

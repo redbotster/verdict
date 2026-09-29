@@ -19,6 +19,7 @@ import {
   toHex,
   encodeAbiParameters,
   getContractAddress,
+  zeroHash,
   type Abi,
 } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
@@ -107,7 +108,8 @@ test("resolver relay: submitAttestation and release against a real deployed Mile
   const CHALLENGE_WINDOW = 60n; // short, so the test can advance past it quickly
   const FEE_BPS = 100;
   const QUESTION_HASH = keccak256(toHex("integration-test-question"));
-  const DOMAIN_NAME = "IMD-Attestation";
+  // Real values, confirmed against IMD's own dedicated attestation endpoint — docs/DAY-ONE-FINDINGS.md §25.
+  const DOMAIN_NAME = "IdentityMD Oracle";
   const DOMAIN_VERSION = "1";
 
   // Verified against contracts/src/MilestoneEscrow.sol's TERMS_TYPEHASH string directly.
@@ -163,24 +165,30 @@ test("resolver relay: submitAttestation and release against a real deployed Mile
   assert.equal(escrowAddress.toLowerCase(), predictedEscrow.toLowerCase());
 
   // --- The "oracle" signs a real Attestation; the resolver (a fourth, unrelated account) relays it ---
+  // AttestationMessage (this package's convenience shape, boolean `answer`) is what submitAttestation()
+  // actually takes — relay.ts's toAbiMessage() encodes `answer` into the real wire shape internally.
+  // But signTypedData here needs the RAW wire shape directly (matching ATTESTATION_TYPES exactly,
+  // `answer` as ABI-encoded dynamic bytes) since it's signing over the real struct, not going through
+  // toAbiMessage. Real field shapes confirmed live — docs/DAY-ONE-FINDINGS.md §25.
   const message: AttestationMessage = {
-    requestId: 1n,
+    requestId: "0x0000000000000000000000000000000000000000000000000000000000000001",
     chainId: 31337n,
     questionHash: QUESTION_HASH,
-    answerType: "bool",
+    answerType: 0,
     answer: true,
-    figure: "",
+    figure: 0n,
     fromBlock: 1n,
     toBlock: 2n,
-    panelJobId: "panel-1",
+    blockHash: zeroHash,
+    panelJobId: "0x0000000000000000000000000000000000000000000000000000000000000002",
     issuedAt: now,
     expiresAt: now + 3600n,
   };
   const signature = await oracle.signTypedData({
     domain: attestationDomain(31337, escrowAddress, DOMAIN_NAME, DOMAIN_VERSION),
     types: ATTESTATION_TYPES,
-    primaryType: "Attestation",
-    message,
+    primaryType: "OracleAttestation",
+    message: { ...message, answer: encodeAbiParameters([{ type: "bool" }], [message.answer]) },
   });
 
   const resolverWallet = walletFor(resolverAccount);

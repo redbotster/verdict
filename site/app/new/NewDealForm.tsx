@@ -46,7 +46,10 @@ export function NewDealForm() {
     deadlineIso: "",
     amount: "1000000000",
     token: "",
-    oracleSigner: "",
+    // Real IMD oracle signer, confirmed live 2026-09-29 by recovering a real attestation's signer
+    // and matching IMD's own reported signer field — see docs/DAY-ONE-FINDINGS.md §25. Still an
+    // editable field (deals against a different oracle instance would need a different address).
+    oracleSigner: "0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982",
     feeRecipient: "",
     feeBps: "100",
     graceHours: "168",
@@ -193,7 +196,7 @@ export function NewDealForm() {
           form.feeRecipient as Address,
           Number(form.feeBps),
           BigInt(Number(form.challengeWindowHours) * 3600),
-          "IMD-Attestation",
+          "IdentityMD Oracle", // real domain name, confirmed against IMD's own attestation endpoint — docs/DAY-ONE-FINDINGS.md §25
           "1",
           payerAuthorization,
         ],
@@ -256,7 +259,7 @@ export function NewDealForm() {
           <Field label="Token address">
             <input required className={inputClass} placeholder="0x…" value={form.token} onChange={(e) => set("token", e.target.value)} />
           </Field>
-          <Field label="Oracle signer" hint="PLACEHOLDER — must match IMD's real attestation signer address, unconfirmed (see docs/DAY-ONE-FINDINGS.md)">
+          <Field label="Oracle signer" hint="Defaults to IMD's real confirmed attestation signer (docs/DAY-ONE-FINDINGS.md §25) — only change this for a different oracle instance">
             <input required className={inputClass} placeholder="0x…" value={form.oracleSigner} onChange={(e) => set("oracleSigner", e.target.value)} />
           </Field>
           <Field label="Fee recipient">
@@ -329,7 +332,10 @@ export function NewDealForm() {
         <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Ready-to-deploy payload</h2>
           <p className="mb-3 text-xs text-amber-700 dark:text-amber-400">
-            `oracleSigner`, `domainName`, and `domainVersion` are unconfirmed against a live IMD attestation — see docs/DAY-ONE-FINDINGS.md before actually deploying this.
+            `domainName`/`domainVersion` and the default `oracleSigner` below are now confirmed against
+            a real IMD attestation (docs/DAY-ONE-FINDINGS.md §25) — but the contract&apos;s attestation
+            verification logic was only just corrected to match and hasn&apos;t settled a real deal yet.
+            Read §25 before deploying this for anything real.
           </p>
           <pre className="overflow-x-auto rounded-md bg-zinc-100 p-4 text-xs dark:bg-zinc-950">
             {JSON.stringify(
@@ -345,7 +351,7 @@ export function NewDealForm() {
                 feeRecipient: form.feeRecipient,
                 feeBps: Number(form.feeBps),
                 challengeWindow: (Number(form.challengeWindowHours) * 3600).toString(),
-                domainName: "IMD-Attestation",
+                domainName: "IdentityMD Oracle",
                 domainVersion: "1",
                 payerAuthorization,
                 payeeAcknowledgment,

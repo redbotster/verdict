@@ -20,7 +20,7 @@
 //
 //   VERDICT_PRIVATE_KEY=$(grep -oP '(?<=^EVM_PRIVATE_KEY=).*' ~/.secrets/verdict.env) npm run base-mainnet-demo
 
-import { createPublicClient, createWalletClient, http, keccak256, toHex, encodeAbiParameters, getContractAddress, parseAbi } from "viem";
+import { createPublicClient, createWalletClient, http, keccak256, toHex, encodeAbiParameters, getContractAddress, parseAbi, zeroHash } from "viem";
 import type { Account, Chain, Hash, PublicClient, Transport, WalletClient } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { base } from "viem/chains";
@@ -32,7 +32,7 @@ import { submitAttestation, release, withdraw, readEscrowState } from "../src/re
 import { attestationDomain, ATTESTATION_TYPES } from "../src/eip712.ts";
 
 const RPC_URL = "https://mainnet.base.org";
-const DOMAIN_NAME = "IMD-Attestation";
+const DOMAIN_NAME = "IdentityMD Oracle"; // real value, confirmed against IMD's own attestation endpoint — docs/DAY-ONE-FINDINGS.md §25
 const DOMAIN_VERSION = "1";
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const; // confirmed 2026-09-29, see DAY-ONE-FINDINGS.md §11
 
@@ -148,24 +148,29 @@ async function main() {
   // see the file header on why that matters on this RPC.
   const attestBlock = await publicClient.getBlock();
   const nowAtAttest = attestBlock.timestamp;
+  // AttestationMessage (boolean `answer`) is what submitAttestation() takes — relay.ts's
+  // toAbiMessage() encodes `answer` into the real wire shape internally. signTypedData below needs
+  // the raw wire shape directly, so `answer` is ABI-encoded separately for that call. Real field
+  // shapes confirmed live — docs/DAY-ONE-FINDINGS.md §25.
   const message = {
-    requestId: 1n,
+    requestId: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
     chainId: 8453n,
     questionHash,
-    answerType: "bool",
+    answerType: 0,
     answer: true,
-    figure: "",
+    figure: 0n,
     fromBlock: 1n,
     toBlock: 2n,
-    panelJobId: "demo-panel-1",
+    blockHash: zeroHash,
+    panelJobId: "0x0000000000000000000000000000000000000000000000000000000000000002" as `0x${string}`,
     issuedAt: nowAtAttest,
     expiresAt: nowAtAttest + 3600n,
   };
   const signature = await oracle.signTypedData({
     domain: attestationDomain(8453, escrowAddress, DOMAIN_NAME, DOMAIN_VERSION),
     types: ATTESTATION_TYPES,
-    primaryType: "Attestation",
-    message,
+    primaryType: "OracleAttestation",
+    message: { ...message, answer: encodeAbiParameters([{ type: "bool" }], [message.answer]) },
   });
   const submitHash = await submitAttestation(walletClient, escrowAddress, { message, signature });
   await mustSucceed(submitHash, "submitAttestation");

@@ -23,15 +23,16 @@ const EXPECTED_SIGNER = "0x2590fc6823ede90dbebac41bb5759c14555e6aab"; // this ag
 const FAKE_ESCROW = "0x1234567890123456789012345678901234567890" as const; // never deployed — proves signing, not delivery
 
 const message: AttestationMessage = {
-  requestId: 1n,
+  requestId: "0x0000000000000000000000000000000000000000000000000000000000000001",
   chainId: 1n,
   questionHash: "0x1c116c28eccc74f0f0c3b4aae874b48c45df1070b3e732096cd40fb8700f4164",
-  answerType: "bool",
+  answerType: 0,
   answer: true,
-  figure: "0",
+  figure: 0n,
   fromBlock: 1n,
   toBlock: 2n,
-  panelJobId: "test",
+  blockHash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  panelJobId: "0x0000000000000000000000000000000000000000000000000000000000000002",
   issuedAt: 1000n,
   expiresAt: 2000n,
 };

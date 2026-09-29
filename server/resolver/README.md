@@ -216,6 +216,16 @@ that ever gets fixed, but isn't what `site/app/api/resolve/[address]/route.ts` a
 - **`resolve.ts`**'s control flow (approval gating, questionHash mismatch handling, the
   true/false branch logic) — unit-tested with fake wallet/public clients, independent of both the
   chain and the unconfirmed IMD steps above.
+- **`eip712.ts`'s `ATTESTATION_TYPES` and `types.ts`'s `AttestationMessage`** — real, confirmed field
+  shapes, not an assumption. The struct name (`OracleAttestation`, not the earlier-assumed
+  `Attestation`), the domain name (`"IdentityMD Oracle"`), and several field types were all found
+  wrong the hard way (§25) and are now independently verified: recovering IMD's own real captured
+  attestation signature with this exact scheme matches its own reported signer address exactly.
+- **`oracleResult.ts`'s `getRealAttestation()`** — calls IMD's dedicated
+  `GET /oracle/requests/:id/attestation` endpoint, the actual source of the domain/types needed to
+  verify or submit an attestation on-chain. The general status endpoint's own `attestation` field
+  looks similar but isn't enough (§25) — this codebase never called the dedicated endpoint until §25's
+  investigation found it.
 
 ## End-to-end demo (`scripts/e2e-demo.ts`)
 
