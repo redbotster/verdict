@@ -4,8 +4,8 @@ export { submitAttestation, release, reclaim, withdraw, readEscrowState } from "
 export type { EscrowSnapshot } from "./relay.ts";
 export { needsApproval, NOT_IMPLEMENTED_APPROVAL_GATE, ApprovalNotWiredError } from "./approval.ts";
 export type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "./approval.ts";
-export { NOT_IMPLEMENTED_PAYMENT_SIGNER, PaymentSigningNotWiredError } from "./paymentSigner.ts";
-export type { PaymentSigner, PaymentSignature } from "./paymentSigner.ts";
+export { NOT_IMPLEMENTED_PAYMENT_SIGNER, PaymentSigningNotWiredError, imdPaymentSigner } from "./paymentSigner.ts";
+export type { PaymentSigner, PaymentSignature, TypedDataSigner } from "./paymentSigner.ts";
 export { fetchOracleAttestation, UnconfirmedOracleResultShapeError } from "./oracleResult.ts";
 export { attestationDomain, ATTESTATION_TYPES } from "./eip712.ts";
 export { loadMilestoneEscrowArtifact } from "./artifact.ts";

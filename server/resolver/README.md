@@ -25,15 +25,23 @@ audit). This resolver is just one wallet paying gas to call them — a bug or a 
 waste gas or delay settlement, but the escrow's payer, payee, and deadline were already fixed
 immutably at deployment. Anyone else can relay the same public attestation if this resolver is down.
 
-## What's stubbed, and why
+## `PaymentSigner` is real now (`src/paymentSigner.ts`)
 
-Two seams are deliberately left as pluggable, throwing-by-default stubs rather than guessed-at
-implementations — same pattern as `imd-client`'s `pay()` and `oracle-compiler`'s extraction step:
+`imdPaymentSigner(account)` builds and signs both of IMD's required signatures — a Permit2
+`PermitWitnessTransferFrom` payment, then a `QuoteApproval` binding it to the exact quote — following
+the schema reverse-engineered from IMD's own shipped frontend (`docs/DAY-ONE-FINDINGS.md` §13; the
+actual construction lives in `@verdict/imd-client`'s `paymentSigning.ts`). `account` just needs
+`address` and `signTypedData` — a viem `LocalAccount` works directly, and so would a 1Claw-backed
+signer once its Intents API dashboard toggle (§10) is flipped for an agent. Both produced signatures
+are confirmed genuinely valid — they independently recover to the signer's address via viem's
+`recoverTypedDataAddress` (`test/paymentSigner.test.ts`), not just asserted well-formed.
 
-- **`PaymentSigner`** (`src/paymentSigner.ts`) — IMD's Permit2 payment payload and EIP-712
-  quote-approval schema are unconfirmed (their reference implementation is in a private repo; see
-  `docs/DAY-ONE-FINDINGS.md`). `NOT_IMPLEMENTED_PAYMENT_SIGNER` throws a clear error naming exactly
-  what's missing.
+**Not yet done**: a real submission to IMD's live paid endpoint — that spends real `$IMD` — held for
+an explicit go-ahead. `NOT_IMPLEMENTED_PAYMENT_SIGNER` still exists as the default for callers that
+haven't wired a real signer at all.
+
+## What else is stubbed, and why
+
 - **`fetchOracleAttestation`** (`src/oracleResult.ts`) — the actual `GET /oracle/requests/:id`
   response shape has never been observed, since observing it requires a real paid `oracle.request`.
   Best-effort parsed from spec prose alone; treat a failure here as informative, not proof the rest

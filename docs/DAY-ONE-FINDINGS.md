@@ -340,21 +340,111 @@ not about the contract or the resolver code, but costly to discover blind:
   key up front as a safety net in case a real bug (not just a transient RPC issue) leaves a deal
   needing the same key again mid-run.
 
+## 13. IMD's real payment-signing schema, reverse-engineered from IMD's own shipped frontend
+
+At the user's suggestion ("can we try to reverse engineer it"), 2026-09-29. Every avenue tried
+earlier — GitHub code search, the public `x402` package, IMD's OpenAPI spec's prose, the private
+`Identity-md/protocol` repo — either explicitly refused to give the schema or genuinely didn't have
+it. What none of that considered: **IMD's own public web app has to construct and sign this exact
+payload client-side**, since a human paying via `explorer.imd.fun/hire` needs their browser wallet to
+produce it. That page (confirmed live: "Paying for a request needs an Ethereum wallet") ships this
+logic in its own Next.js JS bundle — ordinary public, unauthenticated, client-side code served to
+every visitor, the same as any webpage's "view source." Downloading and reading that bundle (16
+chunks from `explorer.imd.fun/_next/static/chunks/`, minified but not obfuscated — real function
+names below are this doc's, not IMD's internal ones) gave the complete, real schema for both
+signatures, plus the exact request that submits them. This is reverse-engineering of IMD's own
+production client, not guessing, not a private repo, and not any kind of access-control bypass.
+
+**Signature 1 — the Permit2 payment.** Not a plain `PermitTransferFrom` (§10's generic building
+block) — IMD uses Permit2's **witnessed** variant, binding the transfer's recipient into the permit
+itself:
+
+```
+domain: { name: "Permit2", chainId: <from accept.network>, verifyingContract: "0x000000000022D473030F116dDEE9F6B43aC78BA3" }
+primaryType: "PermitWitnessTransferFrom"
+types: {
+  PermitWitnessTransferFrom: [permitted: TokenPermissions, spender: address, nonce: uint256, deadline: uint256, witness: Witness],
+  TokenPermissions: [token: address, amount: uint256],
+  Witness: [to: address, validAfter: uint256],
+}
+message: {
+  permitted: { token: accept.asset, amount: accept.amount },
+  spender: "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",   // a fixed intermediary — NOT accept.payTo directly
+  nonce: <random 256-bit value>,                             // Permit2's nonces are an unordered bitmap; any unused value works
+  deadline: now + accept.maxTimeoutSeconds,
+  witness: { to: accept.payTo, validAfter: 0 },
+}
+```
+
+This answers the two biggest open questions from earlier: the `spender` is a **separate fixed
+contract** (`0x402085...`), not IMD's `payTo` — presumably it pulls via Permit2 and forwards to
+`payTo`. And the nonce is genuinely **client-chosen and random**, not server-issued.
+
+**Signature 2 — the quote approval.** Binds the exact payment just signed to this exact quote, via a
+self-referential hash:
+
+```
+domain: { name: "IdentityMD Paid Action", version: "1", chainId: <from quote.payment.network> }
+primaryType: "QuoteApproval"
+types: { QuoteApproval: [resource: string, requesterScopeHash: bytes32, quoteId: string,
+  quoteHash: bytes32, paymentHash: bytes32, action: string, asset: address, amount: uint256,
+  payTo: address, expiresAt: uint256] }
+message: {
+  resource: challenge.resourceUrl, requesterScopeHash: challenge.requesterScopeHash,
+  quoteId: quote.id, quoteHash: quote.quoteHash,
+  paymentHash: sha256(canonicalJson(fullPaymentPayload)),   // see below
+  action: quote.action, asset: quote.payment.asset, amount: quote.payment.amount,
+  payTo: quote.payment.payTo, expiresAt: quote.expiresAt,
+}
+```
+
+`paymentHash` is `sha256` of a **canonical JSON serialization** of the entire payment payload signed
+in step 1 (`{x402Version, payload: {signature, permit2Authorization}, accepted}`) — recursively
+sorted object keys, standard JSON primitive encoding, rejects `undefined`/non-finite/non-integer
+numbers. This is what cryptographically binds the two signatures together so one can't be replayed
+against a different payment or quote. The canonicalizer is a real, specific algorithm (not just
+`JSON.stringify`) — implemented exactly in `server/imd-client/src/paymentSigning.ts`'s
+`canonicalJson()`.
+
+**The actual submit call**, also confirmed from the bundle:
+
+```
+POST {orderId}/submit
+body: { quoteSignature: <signature 2> }
+headers: { "PAYMENT-SIGNATURE": base64(JSON.stringify(fullPaymentPayload)) }   // standard base64, not base64url
+```
+
+**Implemented for real**: `server/imd-client/src/paymentSigning.ts` (pure, dependency-free builders
+— `buildPermit2Authorization`, `permit2PaymentTypedData`, `canonicalJson`, `paymentPayloadHash`,
+`quoteApprovalTypedData`, `encodePaymentSignatureHeader`) and `server/resolver/src/paymentSigner.ts`'s
+`imdPaymentSigner(account)`, which is now a fully real `PaymentSigner` — no longer a stub. Both
+signatures are proven to be genuinely valid, independently-verifiable EIP-712 signatures (recovering
+to the signer's own address via `viem`'s `recoverTypedDataAddress`), tested in
+`server/imd-client/test/paymentSigning.test.ts` and `server/resolver/test/paymentSigner.test.ts`.
+
+**What's still not done, deliberately**: this has never been submitted in a real, paid
+`POST /requests/:id/submit` call — that would actually spend the wallet's real `$IMD`. Everything up
+to that point (quote, challenge, building and signing both real payloads with the real wallet) can be
+exercised for free; only the final submission costs money, so it's held for an explicit go-ahead.
+
+**Caveat, stated plainly**: this is IMD's *current* shipped frontend (chunk `2-2_bbu6gpe2k.js` as of
+2026-09-29), not a published, versioned API contract — it's exactly as stable as any website's
+frontend build, which is to say, not guaranteed. If it ever stops matching IMD's real server-side
+verification, re-fetch and re-diff the bundle rather than assuming this document is still current.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
-- The exact EIP-712 `quoteApprovalTypedData` schema (domain/types) IMD expects for the second
-  signature in step 5, **and** the exact Permit2 integration parameters (spender, nonce source,
-  witness data) for the first. The 402 challenge body only exposes `extra: {"assetTransferMethod":
-  "permit2"}` — it does not include a full typed-data document to sign as-is. IMD's own reference
-  implementation (`Identity-md/protocol`, `apps/control-plane/src/paid-access/x402.ts`) is not a
-  public repo (`gh api repos/Identity-md/protocol` → 404), so this could not be verified from here,
-  and (per §10) the public `x402` package doesn't implement Permit2 at all, so it can't be verified
-  from there either. **Do not guess at either schema and wire up real signing** — get them from IMD
-  directly (partnership docs, support, or a published SDK) before attempting `ImdClient.pay()` for
-  real.
+- ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
+  parameters~~ — **answered in §13**, reverse-engineered from IMD's own shipped frontend and now
+  implemented for real. Still genuinely unconfirmed: whether IMD's *server-side* verification matches
+  this exactly (never tested against a real paid submission — that costs real money, held for an
+  explicit go-ahead) and whether the frontend logic changes without notice.
 - ~~Whether 1Claw's Intents API can actually produce that signature~~ — answered in §7: yes,
   mechanically (it's a generic EIP-712 signer via `POST /v1/agents/:id/sign`), but only once we have
-  the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema.
+  the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema. Now that §13 supplies
+  those domain/types, `imdPaymentSigner`'s `TypedDataSigner` interface is satisfied by anything with
+  `address` + `signTypedData` — including a 1Claw-backed signer, once its Intents API dashboard
+  toggle (§10) is flipped for an agent.
 - Whether panel size changes price (still flat 0.5 IMD per the capabilities policy regardless of
   `panelSize`, but that's the *listed* price, not necessarily what a 9-member quote charges —
   worth a real quote comparison once someone's ready to spend).
