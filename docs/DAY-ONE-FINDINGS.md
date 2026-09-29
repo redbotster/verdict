@@ -622,6 +622,100 @@ deep merge — patching just `{ allowed_models: [...] }` silently reset `daily_b
 `pii_policy` back to `null` on a prior call in this session. Always resend the full desired
 `shroud_config` on every patch.
 
+## 18. Deployed `site/` to Vercel for real — a monorepo build, an artifact-tracing bug, and a public-RPC reliability finding
+
+First real deployment of this project anywhere: `https://site-lime-nine-69.vercel.app`, a real
+Vercel project (`kevinkevinjonescrs-projects/site`) linked to this monorepo. Getting a genuinely
+working deployment (not just a green build) took real debugging, not a happy-path `vercel deploy`:
+
+**The monorepo's sibling `file:` packages need the whole repo, not just `site/`.** A CLI deploy run
+from `site/` only uploads that directory — none of `../server/*` comes along, so the `file:../server/*`
+dependencies can't resolve. Fixed by linking the Vercel project's Root Directory to `site` (via the
+Vercel API — `vercel project` has no CLI subcommand for this) while running `vercel deploy` from the
+repo root, so the whole monorepo uploads and Vercel builds from within `site/`. Also needed a custom
+Install Command mirroring `.github/workflows/ci.yml`'s own multi-step install (each sibling package
+needs its own `npm install` before `site`'s `file:` deps resolve to something with real
+`node_modules`).
+
+**`.gitignore` isn't `.vercelignore`, and that distinction matters here specifically.**
+`contracts/out/` is gitignored (a build artifact, rightly kept out of git) but `lib/artifact.ts`
+reads that exact file at runtime, and there's no Foundry toolchain on Vercel's build image to
+regenerate it. Vercel CLI falls back to `.gitignore` when no `.vercelignore` exists, which would have
+silently shipped a broken build. Added a root `.vercelignore` that excludes `node_modules`/`.git`/etc.
+but deliberately does *not* exclude `contracts/out/`.
+
+**`outputFileTracingIncludes`' glob keys don't accept literal `[` `]`.** Next's serverless function
+tracer only bundles files it can statically detect via `require`/`import`; `lib/artifact.ts`'s
+dynamically-built path (`path.resolve(..., "../../contracts/out/...")`) isn't traceable that way, so
+`outputFileTracingIncludes` has to force-include it. First attempt used the literal route string
+`"app/deals/[address]/page"` as the glob key — deployed clean, no build warning, but 500'd at runtime
+with "Could not read MilestoneEscrow build artifact." The bug: glob syntax treats `[address]` as a
+*character class* (any one of a/d/d/r/e/s/s), not literal brackets, so the key silently matched
+nothing. Fixed by escaping them (`"**/deals/\\[address\\]/**"`) and verified locally first — the
+`.next/server/app/deals/[address]/page.js.nft.json` trace file listing the artifact path — before
+redeploying. Lesson underlined for the second time this project: a clean build is not proof a config
+value did what you meant; read the actual runtime error.
+
+**A real, live-reachable webhook now exists.** `POST /api/resolve/[address]` (deployed, with
+`RESOLVER_WEBHOOK_SECRET` set as a real Vercel env var) correctly returns 401 with no/wrong secret,
+400 on bad input, and — with `EVM_PRIVATE_KEY` deliberately left unset on this deployment — 500 at
+exactly the point real signing would begin. Deliberate: this proves the deployed route for real
+without needing a funded signer or another paid IMD call to exercise it.
+
+**A real 1Claw Automation reaching this deployed webhook, live**
+(`server/resolver/scripts/real-automation-smoke.ts`): scheduled a manual automation
+(`wait_until` → `http`), it parked, woke at the real deadline, and called the real deployed URL with
+the real `X-Resolver-Secret` header — `scheduleResolutionAutomation` had no way to attach custom
+headers until this pass (fixed: `ScheduleResolutionOptions.headers`, plumbed into the `http` step).
+The run's final status: `failed`, `"step 1 (http) failed: HTTP 500: {\"error\":\"EVM_PRIVATE_KEY is
+not configured\"}"` — the *correct* outcome, proving automation → real network → real deployed route
+→ real application code, stopping cleanly at the one thing left unconfigured on purpose.
+
+**Public RPC endpoints aren't reliable from a serverless deploy.** `/deals/[address]` for the real
+Base mainnet escrow (§12) worked from a local machine against `https://mainnet.base.org` but
+consistently failed from Vercel's functions with a bare "RPC Request failed" — same request,
+different origin. Almost certainly the public RPC throttling/blocking cloud datacenter IPs, a known
+class of problem with free public RPC endpoints. Fixed by switching to a dRPC key
+(`DRPC_API_KEY` in `~/.secrets/verdict.env`) — confirmed working for both Ethereum and Base mainnet,
+and the same deals page now correctly renders **Released** from the real deployed serverless
+function. Any future production RPC usage should go through a real provider, not a public endpoint.
+
+## 19. Topped up `$IMD` with a second real Uniswap v4 swap, and got the first-ever successful (non-disagreed) real attestation
+
+Per explicit user go-ahead: swapped another 0.003 ETH for `$IMD` (real tx
+[`0x543001...2ad52`](https://etherscan.io/tx/0x543001528336a5ebf62a32dbbe7b575c4beb05834eb61347c1fefd358a62ad52),
+confirmed, `0.5172` → `1.0917` `$IMD`), using the exact pool/router pattern from §11 — re-verified
+against the currently-installed SDK versions and Uniswap's official `v4-core`/`v4-periphery` source
+(not memory) before running, since §11's original script was scratch and no longer exists.
+`amountOutMinimum` was derived from a real `V4Quoter.quoteExactInputSingle` eth_call first (not
+guessed), and the full swap calldata was simulated via `eth_call` and only broadcast after that
+succeeded — same discipline as §11. Also needed a fresh Permit2 `approve()` — the wallet's existing
+allowance (from §14's payment) was for the *exact* amount used then, not unlimited, and was too small
+for a second payment.
+
+**Then ran a second real paid `oracle.request`** — deliberately *not* a repeat of §15's question.
+§15's disagreement traced to panelists citing GitHub's API URL vs. its web URL for the same
+underlying fact; IMD's clustering treats those as different sources. This attempt used
+`page_or_file_live` instead of `release_published`, checking a single, unambiguous URL
+(`https://github.com` serving content matching `"GitHub"`) — every panelist has exactly one thing to
+fetch and cite, removing that specific failure mode by construction, not by luck.
+
+**Result: real success.** The real panel reached quorum and IMD returned a genuine, non-disagreed
+attestation — `answer: true`, over the real question
+`"Does https://github.com serve content matching \"GitHub\" as of 2026-09-29T19:14:16.399Z?"`,
+`requestId 66197201805114800400243868744046587535846106900038257338479703085956498194432`,
+`fromBlock 26077370` → `toBlock 26084840`. This is the first time in this project's life the
+*successful* populated attestation shape has actually been observed, not just assumed —
+confirming `pollOracleUntilResolved`/`parseSignedAttestation` (§16/§17) handle it correctly: the
+call completed without throwing `OracleDisagreedError` or `UnconfirmedOracleResultShapeError`. The
+`signature`/`signer` fields themselves weren't captured in this run's saved log (a large single
+`console.log` got truncated by the background-task output capture, not a script failure — the
+process exited 0, and the order lookup needed to re-fetch it afterward 404's, since orders are
+scoped to the client token that created them, not retrievable with a fresh one) — the still-open item
+is confirming the exact **signature verifies** on-chain against `MilestoneEscrow.sol`'s expected
+signer, which needs a fresh real request to observe end-to-end with logging fixed, not a re-fetch of
+this one.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
@@ -629,12 +723,13 @@ deep merge — patching just `{ allowed_models: [...] }` silently reset `daily_b
   §14**: a real paid submission using this exact schema was admitted on the first attempt, no
   corrections needed. Only remaining caveat: it's IMD's current frontend logic, not a versioned
   contract, so it could still change without notice in the future.
-- ~~The real `GET /oracle/requests/:id` response envelope~~ — the `"assessing"` shape (§14) and the
-  `"disagreed"` failure shape (§15, including the full `members`/`agreement`/`failure` detail) are
-  both now confirmed. Still open: the *successful* populated shape
-  (`attestation`/`signature`/`signer` actually filled in) — the one real paid request run so far
-  disagreed rather than reaching quorum, so a future real request that succeeds would be needed to
-  observe it.
+- ~~The real `GET /oracle/requests/:id` response envelope~~ — the `"assessing"` shape (§14), the
+  `"disagreed"` failure shape (§15), and now the **successful** populated shape (§19 — a real
+  request reached quorum, `answer: true`, no `OracleDisagreedError`/shape-parse error) are all
+  confirmed. Only remaining sliver: §19's run didn't get the `signature`/`signer` values themselves
+  into the saved log (an output-capture truncation, not a script failure) — worth a repeat run with
+  output written straight to a file to confirm the signature verifies on-chain against
+  `MilestoneEscrow.sol`'s expected signer, not just that the shape parses.
 - ~~Whether 1Claw's Intents API can actually produce that signature~~ — answered in §7: yes,
   mechanically (it's a generic EIP-712 signer via `POST /v1/agents/:id/sign`), but only once we have
   the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema. Now that §13 supplies

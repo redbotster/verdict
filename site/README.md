@@ -16,6 +16,10 @@ escrow balance, question text and status." Next.js App Router, read-only, server
   exact `EscrowTerms` authorization the contract's constructor checks (`lib/terms.ts` — the same
   scheme as `scripts/deploy-demo.ts` and `server/resolver`, verified to match), and the payee signs an
   off-chain acknowledgment. Ends with a ready-to-deploy JSON payload; it does not deploy anything.
+- `/api/resolve/[address]` — the webhook a 1Claw Automation calls at a deal's deadline; runs
+  `resolveDeal()` server-side with a real signer. Stateless (see "Where the data comes from" below)
+  and guarded by a shared secret (`X-Resolver-Secret` vs. `RESOLVER_WEBHOOK_SECRET`). Live-verified
+  end to end by a real deployed Automation — see `docs/DAY-ONE-FINDINGS.md` §18.
 
 ## The `/new` flow needs its sibling packages as real dependencies, not just relative-path reads
 
@@ -48,9 +52,10 @@ and both are server-only.
   have run in `contracts/` first.
 - **Off-chain** (`lib/deals.ts`): the question text, sources, and quorum aren't on-chain (only
   `questionHash` is) — for now this is a small in-repo registry keyed by escrow address, meant to be
-  populated from `server/oracle-compiler`'s `compileDeal()` output. **No real deals exist yet** —
-  real deployment is blocked on IMD's unconfirmed payment-signing schema (see
-  `docs/DAY-ONE-FINDINGS.md`). A real datastore is future work, not needed for this milestone.
+  populated from `server/oracle-compiler`'s `compileDeal()` output. Two real entries currently live in
+  `lib/demo-deal.local.json` (gitignored, deployed manually alongside the app): a local Anvil demo and
+  the real Base mainnet escrow from `docs/DAY-ONE-FINDINGS.md` §12. A real datastore (not a hand-edited
+  JSON file) is still future work — see the root README's "What's not done".
 
 ## Demo deal, for local development
 
@@ -63,6 +68,31 @@ npm run dev            # then visit the URL it prints
 This is a genuine on-chain deployment (not a mock) — the page you see is reading real contract state
 over RPC, the same code path it'll use against a real Sepolia deployment later. The script prints the
 Anvil PID; kill it when you're done (`kill <pid>`).
+
+## Deployment (Vercel)
+
+Live at [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app). This is a real
+deployment, and getting it actually working (not just a green build) needed several things a
+default `vercel deploy` from `site/` doesn't do — full story in `docs/DAY-ONE-FINDINGS.md` §18:
+
+- The Vercel project's **Root Directory** is set to `site` (via the API — no CLI subcommand for it),
+  but `vercel deploy` runs from the **repo root**, so the whole monorepo uploads and the sibling
+  `file:` packages (`../server/*`) are actually present on disk at build time.
+- A root **`.vercelignore`** (not `.gitignore` — they diverge on purpose here) keeps
+  `contracts/out/` in the upload, since `lib/artifact.ts` needs that exact build artifact at runtime
+  and there's no Foundry toolchain on Vercel's build image to regenerate it.
+- A custom **Install Command** installs each sibling package's own `node_modules` before `site`'s —
+  the same multi-step install `.github/workflows/ci.yml` already does, for the same reason.
+- `next.config.ts`'s `outputFileTracingRoot`/`outputFileTracingIncludes` force-include
+  `contracts/out/MilestoneEscrow.sol/*.json` in the `/deals/[address]` function's bundle, since
+  `lib/artifact.ts`'s dynamically-built path isn't traceable automatically. The glob key needs
+  `[address]`'s brackets escaped (`\\[address\\]`) — unescaped, they're glob character-class syntax,
+  not literal brackets, and the include silently matches nothing.
+- Real env vars set on the deployment: `RESOLVER_WEBHOOK_SECRET` (the webhook's auth). `EVM_PRIVATE_KEY`
+  is deliberately **not** set — the webhook exists and validates real requests but can't sign/relay
+  until a real key (ideally the 1Claw-backed signer, not a raw one) is added.
+- `lib/demo-deal.local.json`'s Base mainnet entry uses a dRPC key, not the public `mainnet.base.org` —
+  the public endpoint works fine locally but was consistently rejected from Vercel's serverless IPs.
 
 ## What this doesn't do
 

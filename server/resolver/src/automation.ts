@@ -30,6 +30,8 @@ export interface ScheduleResolutionOptions {
   resolverWebhookUrl: string;
   /** Extra fields merged into the callback body alongside { dealId }. */
   extraPayload?: Record<string, unknown>;
+  /** Sent with the http step's call, e.g. { "X-Resolver-Secret": ... } for the webhook's auth check. */
+  headers?: Record<string, string>;
 }
 
 export interface ScheduledResolution {
@@ -48,6 +50,7 @@ export async function scheduleResolutionAutomation(opts: ScheduleResolutionOptio
         httpStep(opts.resolverWebhookUrl, {
           name: "call-resolver",
           body: { dealId: opts.dealId, ...opts.extraPayload },
+          headers: opts.headers,
         }),
       ],
     },

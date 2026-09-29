@@ -58,6 +58,20 @@ test("scheduleResolutionAutomation: merges extraPayload into the callback body",
   assert.deepEqual(input.workflow_spec.steps[1]?.body, { dealId: "deal-7", escrowAddress: "0xdead" });
 });
 
+test("scheduleResolutionAutomation: passes headers through to the http step", async () => {
+  const client = fakeClient();
+  await scheduleResolutionAutomation({
+    client,
+    agentId: "agent-1",
+    dealId: "deal-8",
+    deadlineIso: "2026-12-01T00:00:00.000Z",
+    resolverWebhookUrl: "https://example.com/api/resolve",
+    headers: { "X-Resolver-Secret": "shh" },
+  });
+  const input = client.calls.createAutomation!;
+  assert.deepEqual(input.workflow_spec.steps[1]?.headers, { "X-Resolver-Secret": "shh" });
+});
+
 test("scheduleResolutionAutomation: triggers with a deal-scoped idempotency key", async () => {
   let capturedKey: string | undefined;
   const client = fakeClient({

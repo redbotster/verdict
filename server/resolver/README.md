@@ -43,14 +43,21 @@ corrections needed. Real payment tx:
 Full record in `docs/DAY-ONE-FINDINGS.md` §14. `NOT_IMPLEMENTED_PAYMENT_SIGNER` still exists as the
 default for callers that haven't wired a real signer.
 
+A second real paid request (`scripts/imd-real-payment-success-demo.ts`) reached actual quorum and
+got a genuine, non-disagreed attestation — the first time that's happened in this project. See
+`docs/DAY-ONE-FINDINGS.md` §19 for the question design that avoided §15's citation-clustering
+disagreement, and for the one still-open detail (the signature itself wasn't captured in that run's
+log — the shape parsed correctly, which is what matters for the code, but the actual bytes weren't
+saved to also confirm the signature verifies on-chain).
+
 ## What else is stubbed, and why
 
 - **`fetchOracleAttestation`** (`src/oracleResult.ts`) — the real `GET /oracle/requests/:id`
-  response shape is now confirmed while a request is still being worked (`status: "assessing"` —
-  see `docs/DAY-ONE-FINDINGS.md` §14, captured from the real paid request above), but the *populated*
-  shape once a request actually resolves (`attestation`/`signature`/`signer` filled in) is still
-  unconfirmed — this file is still best-effort parsed from spec prose for that part. Treat a failure
-  here as informative, not proof the rest of the resolver is broken.
+  response shape is now confirmed for all three terminal states: `"assessing"` (§14), `"disagreed"`
+  (§15), and the successful populated shape with `attestation`/`signature`/`signer` filled in (§19).
+  `pollOracleUntilResolved` actually waits out real panel-assessment time instead of guessing, and
+  throws a distinct `OracleDisagreedError` rather than misreporting a disagreement as a parse
+  failure.
 - **`ApprovalGate`** (`src/approval.ts`) — 1Claw's Human-Readable Action Approvals aren't wired up.
   The threshold *logic* (`needsApproval`) is real and tested; only the "ask a human" transport is a
   stub.
@@ -90,6 +97,12 @@ parked (not a distinct "waiting" state, despite that word in 1Claw's own prose) 
 that state. Full unit coverage in `test/automation.test.ts` (fake `AutomationClient`, no network).
 No doc/reality gaps found this time — see `docs/DAY-ONE-FINDINGS.md` §7–9 for the ones found earlier
 building the vault side.
+
+`headers` on `ScheduleResolutionOptions` lets the automation's `http` step carry auth (e.g.
+`X-Resolver-Secret`) to a real webhook — added and live-verified against a real deployed site, not
+just localhost, in `scripts/real-automation-smoke.ts`: schedules a real automation against a real
+Vercel deployment's `/api/resolve/[address]`, waits for it to park and fire for real, and confirms
+the run reached real application code (see `docs/DAY-ONE-FINDINGS.md` §18).
 
 ## Permit2 signing via 1Claw's Intents API (`src/permit2.ts`)
 

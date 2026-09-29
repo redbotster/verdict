@@ -39,6 +39,12 @@ structured outputs for every Anthropic model under that billing path (worked aro
 tool-calling), and the model silently computing relative deadlines ("within 7 days") against the
 wrong date because it was never told what today actually is. See §17.
 
+The site is deployed for real: [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app).
+A real 1Claw Automation has been proven to reach its webhook live (§18). And the disagreement from
+§15 wasn't the end of the story — a second real paid request, asking a question with only one
+possible source URL to cite instead of two, reached real quorum and produced the first genuinely
+successful attestation this project has seen. See §18–19.
+
 ## Layout
 
 | Package | What it does | Status |
@@ -48,7 +54,7 @@ wrong date because it was never told what today actually is. See §17.
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
 | `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; the typed-data signer adapter is code-complete but unverified (needs a dashboard toggle — see below) |
 | `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing |
-| `site/` | Status page + dual-approval deal creation + resolver webhook | Pages checked in a real browser; the new webhook route's auth/validation checked against a local dev server |
+| `site/` | Status page + dual-approval deal creation + resolver webhook | **Deployed for real** at [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app); the webhook is live-verified end to end by a real 1Claw Automation |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 
@@ -58,17 +64,17 @@ Each package has its own README with the real depth. This one's just for "does i
   call can do that part. `server/oneclaw-client`'s typed-data signer (a drop-in replacement for the
   raw private key below) is written and tested against a fake client, but can't be live-verified
   until that toggle is flipped.
-- The resolver still runs on a raw `EVM_PRIVATE_KEY` in an env var, not a vault-held key.
-- The webhook a 1Claw Automation calls at a deal's deadline (`site/app/api/resolve/[address]`) exists
-  now and its request handling is verified, but it's never been hit by a real Automation or driven
-  through a real paid IMD call end to end — only up to the point where that would cost money.
-- Never seen a *successful* oracle attestation. The one real paid request we ran disagreed instead —
-  every panelist gave the same right answer, but the agreement logic clusters by the exact source URL
-  they cited, and it didn't cluster them. No attestation gets signed either way when that happens,
-  true or false, which is a real risk worth knowing about, not just a fluke (`docs/DAY-ONE-FINDINGS.md`
-  §15).
+- The resolver still runs on a raw `EVM_PRIVATE_KEY` in an env var, not a vault-held key. The
+  deployed webhook deliberately has none configured yet — it stops cleanly at that point rather than
+  relay anything.
+- A second real request finally got a successful attestation (§19), but the exact signature/signer
+  values weren't captured in that run's log (an output-capture issue, not a shape/parsing failure —
+  see §19). The disagreement risk from §15 is real and worth knowing either way; §19 shows one way to
+  reduce it (pick questions with one unambiguous source URL), not eliminate it.
 - No paid human audit. The Base mainnet demo was one wallet playing every role — proof the contract
   works, not clearance to use it for a real deal.
+- No real database yet. `site/lib/deals.ts` is still a hardcoded placeholder plus a local demo-deal
+  file — fine for the two demo deals in this repo, not for a real product with more than a couple.
 
 ## Ops wallet
 
@@ -77,8 +83,8 @@ Balances move with every demo run, so treat these as a snapshot, not current tru
 
 | Chain | Asset | ~Balance |
 |---|---|---|
-| Ethereum mainnet | ETH | 0.008 |
-| Ethereum mainnet | `$IMD` | 0.017 (one real request already spent 0.5) |
+| Ethereum mainnet | ETH | 0.005 |
+| Ethereum mainnet | `$IMD` | 0.59 (two real requests spent 1.0 so far; topped up once via a real swap, §19) |
 | Base mainnet | ETH | 0.001 |
 
 ## Local setup
@@ -115,3 +121,5 @@ order it was found:
 | 15 | A real panel can disagree even when everyone gives the same answer — read before relying on this |
 | 16 | Fixed the resolver's oracle-polling timing bug, added a 1Claw-backed signer, built the missing webhook |
 | 17 | Real LLM extraction via 1Claw Shroud — a Vertex structured-outputs block, a wrong-date bug, and IMD's undocumented 30-day window cap |
+| 18 | Deployed `site/` to Vercel for real — a monorepo build, an artifact-tracing bug, a live automation-to-webhook proof, and a public-RPC reliability finding |
+| 19 | Topped up `$IMD` with a second real swap, and got the first-ever successful (non-disagreed) real attestation |
