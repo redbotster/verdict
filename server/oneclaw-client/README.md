@@ -67,12 +67,16 @@ Added 2026-09-29, both live-verified against the real API:
   §22): sign-only mode at zero cost (a real, correctly ABI-encoded contract call, signed through the
   agent's real key, independently verified with viem's `recoverTransactionAddress`), and again during
   a real `submitTransaction()` attempt that got a correct signature before failing to broadcast.
-  **Broadcasting itself currently fails** on this org's account — a 200 response with a real-looking
-  `tx_hash` that was never actually sent (confirmed via `GET /v1/agents/:id/transactions`:
-  `status: "signed"`, `error_message: "Broadcast failed: ... please upgrade to paid plan"`, despite
-  this org being on a paid "team" tier already). See `@verdict/resolver`'s `oneClawRelay.ts` — its
-  `TransactionRelay` implementation now checks `status` and throws `OneClawBroadcastFailedError`
-  rather than trusting a `tx_hash` that was never delivered.
+  **Broadcasting through 1Claw's own infrastructure currently fails** on this org's account — a 200
+  response with a real-looking `tx_hash` that was never actually sent (confirmed via
+  `GET /v1/agents/:id/transactions`: `status: "signed"`, `error_message: "Broadcast failed: ... please
+  upgrade to paid plan"`, despite this org being on a paid "team" tier already). See
+  `@verdict/resolver`'s `oneClawRelay.ts` — `oneClawTransactionRelay` (the simple, single-hop version)
+  now checks `status` and throws `OneClawBroadcastFailedError` rather than trusting a `tx_hash` that
+  was never delivered. `oneClawSignAndBroadcastRelay` is the working alternative: it signs via
+  `signTransaction()` (free, no 1Claw broadcast involved) and broadcasts the raw signed tx itself over
+  a plain RPC — proven live on Base mainnet (`docs/DAY-ONE-FINDINGS.md` §22's second addendum), a real
+  transaction that actually landed on-chain.
 
 ## Auth
 

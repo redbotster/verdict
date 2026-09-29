@@ -60,12 +60,15 @@ what was actually compiled, and writes the row for the resolver webhook to use l
 
 1Claw can also sign the resolver's on-chain writes (`submitAttestation`/`release`), not just IMD's
 payment (§22) — real, correctly targeted and encoded transactions, independently verified with viem
-to recover to the agent's real signing key. But actually *broadcasting* them for real currently fails
-on 1Claw's own infrastructure, confirmed by trying it on Base mainnet with real USDC: 1Claw signs
-correctly, then its own RPC relay fails to deliver, returning a `tx_hash` for a transaction that was
-never actually sent. No funds were at risk — cleanly reclaimed once the demo's deadline elapsed — but
-this means the raw-private-key gap is still open on the delivery side, not just half-closed. See §22
-for the exact error and why the org's paid tier doesn't explain it.
+to recover to the agent's real signing key. Actually *broadcasting* them through 1Claw's own
+infrastructure fails, confirmed by trying it on Base mainnet with real USDC: 1Claw signs correctly,
+then its own RPC relay fails to deliver, returning a `tx_hash` for a transaction that was never
+actually sent — no funds were at risk, cleanly reclaimed once the demo's deadline elapsed. But the
+self-broadcast alternative — sign via 1Claw, broadcast the raw tx over a plain RPC directly — is now
+built (`oneClawSignAndBroadcastRelay`) and proven for real on Base mainnet: a real transaction, signed
+by 1Claw and broadcast by this code, landed on-chain and confirmed. The raw-private-key gap for the
+resolver's on-chain writes is now genuinely closed, not just half-closed. See §22 for both the
+original failure and the fix.
 
 ## Layout
 
@@ -74,23 +77,22 @@ for the exact error and why the org's paid tier doesn't explain it.
 | `contracts/` | `MilestoneEscrow.sol`, the on-chain escrow | 56/56 tests, audited, live on Base mainnet (demo) |
 | `server/imd-client/` | IMD's paid-request client, all 8 steps | All real, including payment signing |
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
-| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; typed-data signing and transaction signing both work through 1Claw's Intents API, but real broadcast delivery currently fails on 1Claw's own infrastructure (§22) |
-| `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing; can relay through a local account, or (once 1Claw's broadcast issue is resolved) 1Claw's Intents API |
+| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; typed-data signing and transaction signing both work through 1Claw's Intents API; 1Claw's own broadcast delivery fails, but a sign-via-1Claw + broadcast-via-RPC alternative works and is proven live (§22) |
+| `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing; can relay through a local account or through 1Claw (`oneClawSignAndBroadcastRelay`), with no private key in the process either way |
 | `site/` | Status page + dual-approval deal creation + registration + resolver webhook | **Deployed for real** on Vercel (URL withheld, see above), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 
 ## What's not done
 
-- Retiring `EVM_PRIVATE_KEY` is only half-closed. Typed-data signing (§20, IMD's payment) works for
-  real. Transaction *signing* also works for real (§22) — but actual on-chain *delivery* of a signed
-  transaction through 1Claw currently fails on 1Claw's own broadcast infrastructure, confirmed by
-  trying it for real on Base mainnet. Until that's fixed (on 1Claw's side, or worked around by
-  broadcasting a 1Claw-signed raw tx through a normal RPC directly, which isn't built), a real
-  resolver still needs `EVM_PRIVATE_KEY` for the on-chain writes. The deployed webhook's code prefers
-  1Claw when configured and falls back to the raw key; its live configuration deliberately doesn't set
-  1Claw credentials, since doing so would make a standing endpoint able to spend real `$IMD` on any
-  future trigger — a decision, not a default.
+- Retiring `EVM_PRIVATE_KEY` for the resolver's on-chain writes is now genuinely closed (§22).
+  Typed-data signing (IMD's payment, §20) and transaction signing (§22) both work for real through
+  1Claw. 1Claw's own broadcast infrastructure fails to deliver a signed transaction, but the
+  self-broadcast alternative — sign via 1Claw, broadcast the raw tx via a normal RPC directly
+  (`oneClawSignAndBroadcastRelay`) — is built and proven for real on Base mainnet. The deployed
+  webhook's code prefers this 1Claw path when configured and falls back to the raw key; its live
+  configuration deliberately doesn't set 1Claw credentials yet, since doing so would make a standing
+  endpoint able to spend real `$IMD` on any future trigger — a decision, not a default.
 - The deployed webhook has no signer configured at all right now (neither path) — it stops cleanly
   at that point rather than relay anything.
 - A second real request finally got a successful attestation (§19), but the exact signature/signer
@@ -152,4 +154,4 @@ order it was found:
 | 19 | Topped up `$IMD` with a second real swap, and got the first-ever successful (non-disagreed) real attestation |
 | 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |
 | 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |
-| 22 | On-chain transaction *signing* via 1Claw works; real *broadcast* fails on 1Claw's own infrastructure — confirmed on Base mainnet, no funds lost |
+| 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet |

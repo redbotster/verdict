@@ -106,13 +106,11 @@ secret). Getting it actually working (not just a green build) needed several thi
 - Real env vars set on the deployment: `RESOLVER_WEBHOOK_SECRET` (the webhook's auth),
   `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (real deal storage — see "Where the data comes from"
   above). Neither `EVM_PRIVATE_KEY` nor `ONE_CLAW_RESOLVER_AGENT_ID`/`_AGENT_API_KEY`/`_ADDRESS` are
-  set — the webhook's code tries the 1Claw path first, then falls back to the raw key, then refuses
-  cleanly with neither (see the route's own header comment and `docs/DAY-ONE-FINDINGS.md` §22). Not
-  activating the 1Claw path on this deployment is deliberate: it would make a live, standing endpoint
-  able to spend real `$IMD` on any future trigger, a real decision rather than a default — and
-  separately, as of §22, the 1Claw path's on-chain *delivery* doesn't actually work yet regardless
-  (signing does; broadcasting fails on 1Claw's own infrastructure), so there's no working alternative
-  to activate right now anyway.
+  set — the webhook's code tries the 1Claw path first (via `oneClawSignAndBroadcastRelay`, which
+  actually delivers a transaction — see `docs/DAY-ONE-FINDINGS.md` §22), then falls back to the raw
+  key, then refuses cleanly with neither. Not activating the 1Claw path on this deployment is
+  deliberate: it would make a live, standing endpoint able to spend real `$IMD` on any future trigger —
+  a real decision rather than a default, unrelated to whether the code path itself works (it does now).
 - `lib/demo-deal.local.json`'s Base mainnet entry uses a dRPC key, not the public `mainnet.base.org` —
   the public endpoint works fine locally but was consistently rejected from Vercel's serverless IPs.
 

@@ -2,8 +2,8 @@ export { resolveDeal, defaultGetAttestation, TransactionRelayNotConfiguredError 
 export type { ResolveDealParams, ResolveDealOptions, ResolveResult, GetAttestationFn } from "./resolve.ts";
 export { submitAttestation, release, reclaim, withdraw, readEscrowState, viemTransactionRelay, toAbiMessage } from "./relay.ts";
 export type { EscrowSnapshot, TransactionRelay } from "./relay.ts";
-export { oneClawTransactionRelay, OneClawBroadcastFailedError } from "./oneClawRelay.ts";
-export type { OneClawTransactionRelayOptions } from "./oneClawRelay.ts";
+export { oneClawTransactionRelay, oneClawSignAndBroadcastRelay, OneClawBroadcastFailedError } from "./oneClawRelay.ts";
+export type { OneClawTransactionRelayOptions, OneClawSignAndBroadcastRelayOptions } from "./oneClawRelay.ts";
 export { needsApproval, NOT_IMPLEMENTED_APPROVAL_GATE, ApprovalNotWiredError } from "./approval.ts";
 export type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "./approval.ts";
 export { NOT_IMPLEMENTED_PAYMENT_SIGNER, PaymentSigningNotWiredError, imdPaymentSigner } from "./paymentSigner.ts";

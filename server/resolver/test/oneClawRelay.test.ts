@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeFunctionData } from "viem";
-import { oneClawTransactionRelay, OneClawBroadcastFailedError } from "../src/oneClawRelay.ts";
+import { decodeFunctionData, type PublicClient } from "viem";
+import { oneClawTransactionRelay, oneClawSignAndBroadcastRelay, OneClawBroadcastFailedError } from "../src/oneClawRelay.ts";
 import { loadMilestoneEscrowArtifact } from "../src/artifact.ts";
 import type { OneClawClient } from "../../oneclaw-client/src/client.ts";
 import type { SignedAttestation } from "../src/types.ts";
@@ -90,4 +90,52 @@ test("oneClawTransactionRelay: throws OneClawBroadcastFailedError when 1Claw ret
 
   const relay = oneClawTransactionRelay({ client: fakeClient, agentId: "agent-1", chain: "base" });
   await assert.rejects(() => relay.release(ESCROW_ADDRESS), OneClawBroadcastFailedError);
+});
+
+test("oneClawSignAndBroadcastRelay: signs via 1Claw (BYORPC) and broadcasts the raw tx itself over eth_sendRawTransaction", async () => {
+  // The actual working path (docs/DAY-ONE-FINDINGS.md §22's addendum): 1Claw's own broadcaster is
+  // currently broken, so this relay signs only (never costs 1Claw gas or hits their broadcaster) and
+  // sends the resulting raw signed tx over a plain RPC via the caller's own PublicClient instead.
+  let signInput: { agentId: string; input: unknown } | undefined;
+  const fakeClient = {
+    signTransaction: async (agentId: string, input: unknown) => {
+      signInput = { agentId, input };
+      return {
+        signed_tx: "0xdeadbeef",
+        tx_hash: "0xprecomputedhash",
+        from: "0x2590fc6823ede90dbebac41bb5759c14555e6aab",
+        to: ESCROW_ADDRESS,
+        chain: "base",
+        chain_id: 8453,
+        nonce: 0,
+        value_wei: "0",
+        status: "signed",
+      };
+    },
+  } as unknown as OneClawClient;
+
+  let broadcastRequest: { method: string; params: unknown[] } | undefined;
+  const fakePublicClient = {
+    request: async (req: { method: string; params: unknown[] }) => {
+      broadcastRequest = req;
+      return "0xrealbroadcasthash";
+    },
+  } as unknown as PublicClient;
+
+  const relay = oneClawSignAndBroadcastRelay({ client: fakeClient, agentId: "agent-1", chain: "base", publicClient: fakePublicClient });
+  const txHash = await relay.submitAttestation(ESCROW_ADDRESS, fakeAttestation());
+
+  // The returned hash comes from the actual broadcast, not 1Claw's own (unverified) tx_hash guess.
+  assert.equal(txHash, "0xrealbroadcasthash");
+  assert.equal(signInput?.agentId, "agent-1");
+  const signed = signInput?.input as { chain: string; to: string; value: string; data: `0x${string}` };
+  assert.equal(signed.chain, "base");
+  assert.equal(signed.to, ESCROW_ADDRESS);
+
+  const { abi } = loadMilestoneEscrowArtifact();
+  const decoded = decodeFunctionData({ abi, data: signed.data });
+  assert.equal(decoded.functionName, "submitAttestation");
+
+  assert.equal(broadcastRequest?.method, "eth_sendRawTransaction");
+  assert.deepEqual(broadcastRequest?.params, ["0xdeadbeef"]);
 });

@@ -14,20 +14,18 @@
 //
 // Two ways to configure a real signer, tried in this order:
 //   1. ONE_CLAW_RESOLVER_AGENT_ID / ONE_CLAW_RESOLVER_AGENT_API_KEY / ONE_CLAW_RESOLVER_ADDRESS —
-//      routes both IMD's payment signature (oneClawTypedDataSigner, §20) and the on-chain
-//      submitAttestation()/release() writes (oneClawTransactionRelay, §22) through 1Claw's Intents
-//      API. No private key ever exists in this process. Payment signing and transaction *signing*
-//      are both live-verified real — but real on-chain *broadcast* currently fails on 1Claw's own
-//      infrastructure (confirmed on Base mainnet with real USDC, no funds lost): it signs correctly,
-//      returns a tx_hash, then never actually delivers. oneClawTransactionRelay now throws
-//      OneClawBroadcastFailedError when this happens rather than hanging on a receipt that never
-//      comes — but this path genuinely doesn't work end to end yet. See §22.
-//   2. EVM_PRIVATE_KEY — the original, raw-key fallback, and currently the only path that actually
-//      delivers a transaction. Used if (1) isn't fully configured.
+//      routes IMD's payment signature (oneClawTypedDataSigner, §20) through 1Claw's Intents API, and
+//      the on-chain submitAttestation()/release() writes through oneClawSignAndBroadcastRelay (§22's
+//      addendum): 1Claw signs the transaction (BYORPC, no raw key in this process), and this route
+//      broadcasts the resulting raw signed tx itself via `publicClient`, since 1Claw's own broadcaster
+//      currently fails silently (oneClawTransactionRelay, the simpler single-hop version, hits that
+//      failure and throws OneClawBroadcastFailedError — kept in @verdict/resolver for when 1Claw's
+//      broadcaster is eventually fixed, but not used here).
+//   2. EVM_PRIVATE_KEY — the original, raw-key fallback. Used if (1) isn't fully configured.
 // Neither configured: refuses with a clear error rather than silently doing nothing.
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { resolveDeal, imdPaymentSigner, oneClawTransactionRelay, type TransactionRelay } from "@verdict/resolver";
+import { resolveDeal, imdPaymentSigner, oneClawSignAndBroadcastRelay, type TransactionRelay } from "@verdict/resolver";
 import { generateClientToken } from "@verdict/imd-client";
 import { OneClawClient, oneClawTypedDataSigner, oneClawChainName, type TypedDataSigner } from "@verdict/oneclaw-client";
 import { getDealMetadata } from "@/lib/deals";
@@ -88,7 +86,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     const chain = oneClawChainName(deal.chainId);
     const signer: TypedDataSigner = oneClawTypedDataSigner({ client, agentId: oneClawAgentId, address: oneClawAddress, chain });
     paymentSigner = imdPaymentSigner(signer);
-    relay = oneClawTransactionRelay({ client, agentId: oneClawAgentId, chain });
+    // oneClawTransactionRelay (1Claw signs AND broadcasts) currently fails at the broadcast step on
+    // 1Claw's own infrastructure — see §22's addendum. oneClawSignAndBroadcastRelay signs via the same
+    // 1Claw endpoint (BYORPC, no raw key in this process) but broadcasts the resulting raw tx itself
+    // via this same publicClient, bypassing 1Claw's broken broadcaster. This is the path that actually
+    // delivers a transaction today.
+    relay = oneClawSignAndBroadcastRelay({ client, agentId: oneClawAgentId, chain, publicClient });
   } else if (privateKey) {
     const account = privateKeyToAccount(privateKey);
     paymentSigner = imdPaymentSigner(account);

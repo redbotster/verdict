@@ -924,11 +924,31 @@ the flow was never in question) returned the exact original amount, confirmed on
 **Net result**: `oneClawTransactionRelay`'s *signing* is proven correct (independently, twice — the
 zero-cost sign-only test above, and this real attempt, which got as far as a correct signature before
 hitting 1Claw's own broadcast infrastructure). Actual *delivery* through 1Claw is currently blocked on
-something in 1Claw's own broadcast path, not on anything in this codebase. Until that's resolved (by
-1Claw, or by finding whatever upgrade/setting actually unblocks it), a real resolver still needs
-either the raw `EVM_PRIVATE_KEY` path or a self-broadcast alternative (sign via 1Claw's sign-only
-mode, then submit the raw signed tx through a normal RPC directly — not yet built, but a
-straightforward next step given the signature itself is already proven correct).
+something in 1Claw's own broadcast path, not on anything in this codebase.
+
+**Second addendum — built and proved the self-broadcast alternative, for real.** The straightforward
+next step named above turned out to work on the first attempt: `oneClawSignAndBroadcastRelay`
+(`server/resolver/src/oneClawRelay.ts`) signs via 1Claw's sign-only endpoint (the same free, proven
+call as above — no raw key in this process) and broadcasts the resulting raw signed tx itself via
+viem's `sendRawTransaction` over a plain RPC, bypassing 1Claw's broadcaster entirely. Ran
+`scripts/oneclaw-sign-and-broadcast-live-test.ts` for real on Base mainnet against the same funded
+signing key (still holding its original 0.00005 ETH, nonce still `0` — independent confirmation that
+the earlier broadcast attempt above truly never spent anything): a trivial 0-value self-transfer,
+signed by 1Claw and broadcast by this code, landed on-chain for real —
+[`0x0d4ea0...4791e4`](https://basescan.org/tx/0x0d4ea0717ceb79deabc82f89fa5348fadfd608da8e0b74d0c1e21e17a74791e4),
+block `51962137`, `status: success`, nonce advanced `0 -> 1`, real gas spent (confirmed after a short
+delay — the first read hit `mainnet.base.org`'s already-documented eventual-consistency lag from §18
+and briefly looked like nothing had happened).
+
+This closes the gap for real: `oneClawSignAndBroadcastRelay` is wired into
+`site/app/api/resolve/[address]/route.ts` as the actual relay used when the `ONE_CLAW_RESOLVER_*` env
+vars are set (still not activated on the live deployment — see the standing-endpoint reasoning above,
+which is unaffected by this). `oneClawTransactionRelay` (the simpler, single-hop version) is kept
+as-is in `@verdict/resolver` for if/when 1Claw's own broadcaster gets fixed, at which point it becomes
+the better default again — but it isn't the one used today. Retiring `EVM_PRIVATE_KEY` for the
+resolver's on-chain writes is now genuinely possible, not just signable; `EVM_PRIVATE_KEY` remains
+required only for the ops-wallet-driven demo scripts (`base-mainnet-demo.ts`, etc.), not for a real
+resolver's core writes.
 
 ## What's still unconfirmed (needs real signing, so held back)
 

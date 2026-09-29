@@ -157,12 +157,22 @@ response `status` and throws `OneClawBroadcastFailedError` instead of trusting a
 never delivered. No funds were at risk: the real USDC was cleanly reclaimed once the demo's short
 deadline+grace window elapsed, confirmed back at the exact original balance.
 
-**Net effect on retiring `EVM_PRIVATE_KEY`**: payment signing (§20) and transaction signing (here) are
-both proven. Actual on-chain *delivery* through 1Claw is not, currently — blocked on something in
-1Claw's own broadcast path, not this codebase. Until that's resolved, a real resolver still needs
-either the raw `EVM_PRIVATE_KEY` path or a "sign via 1Claw, broadcast the raw tx through a normal RPC
-directly" hybrid — not built, but straightforward given the signature itself is already proven
-correct.
+**The working alternative: `oneClawSignAndBroadcastRelay`, proven live.** Since 1Claw's own broadcaster
+is the broken half, `oneClawSignAndBroadcastRelay` signs via the same free `/transactions/sign`
+endpoint (no raw key in this process) and broadcasts the resulting raw signed tx itself via viem's
+`sendRawTransaction` over a plain RPC — the caller's own `publicClient`, the same one `resolveDeal()`
+already uses for `waitForTransactionReceipt`. Ran `scripts/oneclaw-sign-and-broadcast-live-test.ts` for
+real on Base mainnet: a trivial 0-value self-transfer, signed by 1Claw and broadcast by this code,
+landed on-chain for real — confirmed by nonce advancing and a `status: success` receipt (the first
+post-check briefly looked like nothing happened, which turned out to be `mainnet.base.org`'s
+already-documented eventual-consistency lag, not a real failure — see `docs/DAY-ONE-FINDINGS.md` §22's
+second addendum).
+
+**Net effect on retiring `EVM_PRIVATE_KEY`**: payment signing (§20) and transaction signing are both
+proven, and now so is actual on-chain *delivery* — through the self-broadcast path, not through
+1Claw's own broadcaster (which stays broken; `oneClawTransactionRelay` is kept in this package for if
+that ever gets fixed, but isn't what `site/app/api/resolve/[address]/route.ts` actually uses).
+`EVM_PRIVATE_KEY` is no longer required for a real resolver's on-chain writes.
 
 ## What's real and tested
 
