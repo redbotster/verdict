@@ -54,6 +54,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # needed at runtime, not just build time: test/integration.test.ts spawns a real `anvil`
+      # process for its local-chain integration test.
+      - uses: foundry-rs/foundry-toolchain@v1
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - uses: actions/download-artifact@v4
