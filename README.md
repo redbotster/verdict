@@ -22,9 +22,14 @@ compiles a real question against the live IMD API, deploys the real contract bou
   intentionally left unimplemented pending IMD's real signing schema (see findings doc).
 - `server/oracle-compiler/` — the English-deal-to-oracle-question compiler: extract → match a vetted
   template → lint → free dry-run quote. All three templates now live-verified against `api.imd.fun`.
+- `server/oneclaw-client/` — the server-side client for 1Claw's real Vaults/Agents Human API
+  (`api.1claw.co`, confirmed live 2026-09-29 — the real domain is `1claw.co`, not `1claw.ai`; see
+  findings doc §7). Covers the "vault side": vaults, secrets, agents, policies. Deliberately does not
+  cover 1Claw's Intents API (typed-data signing) — that's parked pending IMD's own payment schema.
 - `server/resolver/` — the agent that acts at a deal's deadline: relays the signed attestation and
   settles the escrow. Chain interaction is real and integration-tested against the actual compiled
-  contract on a local Anvil chain; the IMD payment-signing and oracle-result-fetching steps are
+  contract on a local Anvil chain; `src/vaultSecrets.ts` optionally persists the per-deal IMD token in
+  a 1Claw vault instead of a raw env var. The IMD payment-signing and oracle-result-fetching steps are
   stubbed pending the same unconfirmed schemas noted above.
 - `site/` — Next.js App Router. The per-deal status page (`/deals/[address]`), read-only,
   server-rendered directly from live contract state via viem; and `/new`, the spec's dual-approval
@@ -38,8 +43,10 @@ This is scaffolding from an initial pass, not a finished MVP — see the build p
 the full six-week shape. What exists right now:
 
 - Project structure and the full spec/findings docs.
-- A dedicated ops/resolver wallet, freshly generated, unfunded, stored at `~/.secrets/verdict.env`
-  (never committed).
+- A dedicated ops/resolver wallet, freshly generated, stored at `~/.secrets/verdict.env` (never
+  committed). No longer unfunded: `0xF57CfAF1f2b12E7f23C342c4fAfd675379840668` holds real ETH on
+  both Base mainnet (~$5) and Ethereum L1 mainnet (0.01 ETH), confirmed on-chain 2026-09-29 — see
+  "What's deliberately not done yet" below for what that does and doesn't unblock.
 - `MilestoneEscrow.sol` + Foundry tests (56/56 passing, up from the original 36). A follow-up security
   audit plus a Slither pass (see above) found and fixed every issue raised: the payer signs the exact
   deal terms rather than trusting a predicted deploy address, non-standard tokens are rejected at
@@ -94,6 +101,18 @@ the full six-week shape. What exists right now:
   through the live IMD API, deploys the real contract bound to the real resulting `questionHash`, and
   runs it through `resolveDeal()`'s real relay/settle logic — proving compile → deploy → resolve
   actually composes, with only the paid oracle-attestation step faked (see above).
+- `server/oneclaw-client/`: a real client for 1Claw's Vaults/Agents Human API (`api.1claw.co`),
+  built against docs read live on 2026-09-29 (not memory) — vaults, secrets, agents, policies, all
+  typed and typechecked. `resolver/src/vaultSecrets.ts` wires it in as an optional per-deal IMD-token
+  store (spec's `imd/orders/<deal>` vault path). **Live-verified end to end**, not just typechecked:
+  `npm run live-smoke` runs the full golden path (vault → secret → agent → policy → agent-scoped
+  fetch) for real against `api.1claw.co`, self-cleaning. Getting there surfaced real findings, all in
+  `docs/DAY-ONE-FINDINGS.md` §7–9: the real domain is `1claw.co`, not `1claw.ai` (an unrelated Chinese
+  product); 1Claw's Intents API is a generic EIP-712 signer with no special knowledge of IMD's schema,
+  so it doesn't unblock the Permit2/quote-approval gap on its own (still parked); and the live API's
+  agent/vault binding behavior diverges from `docs.1claw.co`'s own reference page for `POST
+  /v1/agents` in two ways — an undocumented required `vault_ids` field, and the docs' own example
+  passing `scopes` explicitly in a way that actually breaks policy-derived secret access.
 - CI (`.github/workflows/ci.yml`), green: `forge test` for the contracts, `tsc --noEmit` +
   `node --test` for each server package, lint + a full `next build` for the site. Getting there
   caught three real bugs, none of which a local "fresh clone" dry run had caught, because that dry
@@ -114,15 +133,21 @@ the full six-week shape. What exists right now:
 What's deliberately not done yet, because it costs real money or needs information this pass
 couldn't get:
 
-- Any real `workflow.open` or `oracle.request` payment (real IMD tokens, mainnet).
-- 1Claw vault/policy/automation wiring (needs the Permit2 signing schema resolved first).
+- Any real `workflow.open` or `oracle.request` payment (real IMD tokens, on Ethereum mainnet).
+- 1Claw's Intents API (typed-data signing) and Automations (cron-triggered resolver runs) —
+  intentionally parked; only the vault/secrets side is built (see above).
 - Extraction has not been run against a real LLM (no Gateway API key available this pass) — everything
   downstream of it is tested by injecting a fixed extraction directly.
-- Funding the ops wallet.
+- Deploying `MilestoneEscrow.sol` to any real chain. The ops wallet now holds real ETH on both Base
+  mainnet (~$5) and Ethereum L1 mainnet (0.01 ETH, sent 2026-09-29) — enough gas for a deployment or
+  transactions on either chain, but the wallet still holds **zero `$IMD` tokens** (checked on-chain),
+  so even the L1 ETH doesn't unblock a real IMD purchase — that needs the actual `$IMD` ERC-20, not
+  just ETH for gas. No contract has been deployed with any of it yet — the audit's closing note (no
+  paid human audit performed) still applies before any real-money deployment.
 
 ## Local setup
 
 ```
-cp .env.example .env   # fill from ~/.secrets/verdict.env and ~/.secrets/1claw.env
+cp .env.example .env   # fill from ~/.secrets/verdict.env (wallet + ONE_CLAW_API_KEY)
 cd contracts && forge test
 ```

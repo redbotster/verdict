@@ -42,6 +42,26 @@ implementations — same pattern as `imd-client`'s `pay()` and `oracle-compiler`
   The threshold *logic* (`needsApproval`) is real and tested; only the "ask a human" transport is a
   stub.
 
+## Vault-backed secrets (`src/vaultSecrets.ts`)
+
+New: `loadOrCreateImdToken(vault, dealId)` and `loadGithubPublishToken(vault)` implement the spec's
+1Claw integration table row "Hold IMD paid tokens, GitHub tokens, LLM keys | Vaults ... | One vault,
+paths `imd/orders/<deal>`, `github/publish`." Both are built on `@verdict/oneclaw-client` (this
+repo's hand-rolled client for `api.1claw.co`, same pattern as `imd-client` for `api.imd.fun` — see
+its README for what's confirmed vs. docs-only, and `docs/DAY-ONE-FINDINGS.md` §7 for the real
+`1claw.co` domain and its Intents-API scope).
+
+`resolveDeal()` itself is unchanged and still takes a plain `imdToken` string
+(`ResolveDealOptions.imdToken`) — it has no dependency on 1Claw at all. `vaultSecrets.ts` is purely a
+convenience for callers that have a vault configured: fetch (or mint-and-persist, for the IMD token)
+the secret, then pass its value into `resolveDeal()` like any other token. A caller without vault
+access can keep calling `generateClientToken()` directly, exactly as `e2e-demo.ts` does today.
+
+**Not live-verified**: `loadOrCreateImdToken`'s "create if missing" branch assumes a missing secret
+returns HTTP 404 (standard REST/RFC 7807 convention) — this has not been confirmed against the real
+API. Run `oneclaw-client`'s `npm run live-smoke` against a fresh vault/path to confirm before relying
+on this in production.
+
 ## What's real and tested
 
 - **`relay.ts`** (`submitAttestation`, `release`, `reclaim`, `withdraw`, `readEscrowState`) — genuine

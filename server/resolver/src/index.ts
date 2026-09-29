@@ -9,4 +9,6 @@ export type { PaymentSigner, PaymentSignature } from "./paymentSigner.ts";
 export { fetchOracleAttestation, UnconfirmedOracleResultShapeError } from "./oracleResult.ts";
 export { attestationDomain, ATTESTATION_TYPES } from "./eip712.ts";
 export { loadMilestoneEscrowArtifact } from "./artifact.ts";
+export { loadOrCreateImdToken, loadGithubPublishToken } from "./vaultSecrets.ts";
+export type { VaultConfig } from "./vaultSecrets.ts";
 export type { AttestationMessage, SignedAttestation, EscrowRef } from "./types.ts";

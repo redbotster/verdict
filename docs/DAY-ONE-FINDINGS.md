@@ -124,6 +124,79 @@ with an Etherscan fallback for unlisted chains — wrong for those chains specif
 present-and-wrong source satisfies schema validation, where an absent one doesn't. All three templates
 are now live-verified end-to-end.
 
+## 7. 1Claw is real (`1claw.co`, not `1claw.ai`) but its Intents API doesn't leak IMD's schema
+
+Investigated 2026-09-29 using `ONE_CLAW_API_KEY` from `~/.secrets/1claw.env`. Two corrections and one
+real result:
+
+- **Domain correction**: `1claw.ai` is an unrelated Chinese product (a self-hosted "AI agent on your
+  own Linux server via 1Panel + OpenClaw" — WhatsApp/Telegram/Discord ops bot). The actual platform the
+  spec means is **`1claw.co`**: "Secure infrastructure for AI agents" — Vaults, Shroud (TEE LLM proxy),
+  the **Intents API** (on-chain signing without holding keys), Automations, Runtimes, Embedded Wallets.
+  Real API base: `api.1claw.co`. Real docs: `docs.1claw.co`. SDKs: `@1claw/sdk`, `@1claw/mcp`, `@1claw/cli`.
+- **The Intents API is a generic EIP-712/transaction signer, not an IMD-aware one.** `POST
+  /v1/agents/:id/sign` takes `intent_type: "typed_data"` with an arbitrary `{domain, types, primaryType,
+  message}` document (gated by `eip712_domain_allowlist`/`eip712_default_policy`) and returns a
+  signature — it has no special knowledge of IMD's `quoteApprovalTypedData` schema. There's also an
+  `eip712_digest` raw-digest mode (blind signing, off by default, human-gated) for cases where the
+  caller computes the canonical digest itself. Conclusion: 1Claw can be the signer for the "IMD
+  Permit2 payment / quote approval" step once we know the exact domain/types to sign — it does not
+  supply that schema itself.
+- **The 402 challenge body was captured live, for free, with no payment.** `POST /requests/quote`
+  (free) → `POST /requests/:id/submit` with no body (confirmed free — no charge until a `quoteSignature`
+  is actually submitted) returns the full x402 v2 challenge:
+  `{x402Version, resource, accepts:[{scheme:"exact", network:"eip155:1", asset, amount, payTo,
+  maxTimeoutSeconds, extra:{assetTransferMethod:"permit2"}}], quote, requesterScopeHash, resourceUrl,
+  input}`. This matches the docs exactly, but confirms the challenge body itself does **not** inline an
+  EIP-712 domain/types for the quote-approval signature — `quoteApprovalTypedData()` builds that
+  client-side from this JSON, and its construction is not published anywhere we could find.
+- **`quoteApprovalTypedData` is confirmed not public.** A GitHub code search returns zero hits for that
+  exact symbol. `x402` itself (the payment-payload half, `createPaymentPayload`) is a real, public npm
+  package (`x402-foundation/x402` on GitHub) implementing the standard x402/Permit2 payment signature —
+  that half is derivable from public docs. The quote-approval half is IMD's own private wrapper, not
+  part of the public x402 spec, and no `@identitymd/*` package exists on the public npm registry (only
+  a scope name seen in IMD's docs prose, not a resolvable install target).
+
+**Net effect on the project's biggest blocker**: half of the required signature (the x402/Permit2
+payment payload) is now buildable against a real, documented, public library. The other half (the
+quote-approval EIP-712 wrapper) still needs to come from IMD directly — support, partnership docs, or
+a published SDK — before `ImdClient.pay()` can be implemented for real. Do not guess at it.
+
+## 8. `ONE_CLAW_API_KEY` in `~/.secrets/1claw.env` was stale; a fresh key (in `~/.secrets/verdict.env`) works
+
+Built `server/oneclaw-client` (2026-09-29) to cover the spec's "vault side" (vaults, secrets, agents,
+policies — see package README). The first key on hand (`~/.secrets/1claw.env`) was rejected by the
+real API: `POST /v1/auth/api-key-token` → clean `401 Invalid API key`, confirmed not a client bug (an
+identical raw `curl` got the byte-identical rejection). A fresh key from the dashboard, placed in
+`~/.secrets/verdict.env`, authenticated successfully.
+
+## 9. The real API's agent/vault binding behavior differs from its own Human API reference docs
+
+Found by running `oneclaw-client`'s `live-smoke` script for real (2026-09-29) — the full golden path
+(vault → secret → agent → policy → agent-scoped fetch) now passes end to end, but getting there
+required two live-only corrections to `docs.1claw.co/docs/vaults/human-api/agents/register-agent`,
+which lists only `name, description, auth_method, scopes, expires_at, api_key_expires_at,
+intents_api_enabled` as the `POST /v1/agents` request body:
+
+- **`vault_ids` is a real, required-in-practice field, undocumented on that page.** Omitting it (as
+  the reference page's own example does) creates an agent bound to no vault; every secret fetch as
+  that agent returns `403 {"detail":"Agent token is not bound to this vault"}`, regardless of any
+  policy granted. It only surfaced because the separate "Agents overview" page's aside on child agents
+  mentions `vault_ids` as a field that exists on agent records. Fix: pass `vaultIds: [vault.id]` (or
+  more) at `createAgent()` time.
+- **Passing `scopes` explicitly breaks policy-derived access.** The register-agent reference page's
+  own example passes `scopes: ["vaults:read"]` — doing exactly that produces a *different* 403 once
+  `vault_ids` is fixed: `{"detail":"Agent token scopes do not cover this secret path"}`, even with a
+  correct policy grant in place. One line elsewhere in the docs ("JWT scopes are derived from those
+  policies when `agents.scopes` is empty") turned out to be the actual behavior — leave `scopes`
+  unset and the policy grant alone determines access. `docs`' own worked example is therefore not
+  copy-paste-correct for the read-secret case; both corrections are now baked into
+  `OneClawClient.createAgent()`'s own doc comment in `src/client.ts`.
+
+Net effect: the vault side is now genuinely live-verified, not just typechecked against docs prose —
+`npm run live-smoke` in `server/oneclaw-client` passes end to end, self-cleaning, against the real
+`api.1claw.co`.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - The exact EIP-712 `quoteApprovalTypedData` schema (domain/types) IMD expects for the second
@@ -133,7 +206,9 @@ are now live-verified end-to-end.
   public repo (`gh api repos/Identity-md/protocol` → 404), so this could not be verified from here.
   **Do not guess at this schema and wire up real signing** — get it from IMD directly (partnership
   docs, support, or a published SDK) before attempting `ImdClient.pay()` for real.
-- Whether 1Claw's Intents API can actually produce that signature (the spec's other top risk).
+- ~~Whether 1Claw's Intents API can actually produce that signature~~ — answered in §7: yes,
+  mechanically (it's a generic EIP-712 signer via `POST /v1/agents/:id/sign`), but only once we have
+  the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema.
 - Whether panel size changes price (still flat 0.5 IMD per the capabilities policy regardless of
   `panelSize`, but that's the *listed* price, not necessarily what a 9-member quote charges —
   worth a real quote comparison once someone's ready to spend).

@@ -35,6 +35,17 @@ jobs:
       - run: npm run typecheck
         working-directory: server/imd-client
 
+  oneclaw-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install
+        working-directory: server/oneclaw-client
+      - run: npm run typecheck
+        working-directory: server/oneclaw-client
+
   oracle-compiler:
     runs-on: ubuntu-latest
     steps:
