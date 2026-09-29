@@ -81,8 +81,10 @@ Each package has its own README with the real depth. This one's just for "does i
   reduce it (pick questions with one unambiguous source URL), not eliminate it.
 - No paid human audit. The Base mainnet demo was one wallet playing every role — proof the contract
   works, not clearance to use it for a real deal.
-- No real database yet. `site/lib/deals.ts` is still a hardcoded placeholder plus a local demo-deal
-  file — fine for the two demo deals in this repo, not for a real product with more than a couple.
+- Real deal storage now exists (Supabase, §21), but nothing writes to it yet — `/new` still only
+  produces a signed deployment payload and doesn't deploy anything, so there's no "register this
+  deployed escrow" step calling `createDeal()` for real. The two demo entries still work via the
+  local-only file, as before.
 
 ## Ops wallet
 
@@ -132,3 +134,4 @@ order it was found:
 | 18 | Deployed `site/` to Vercel for real — a monorepo build, an artifact-tracing bug, a live automation-to-webhook proof, and a public-RPC reliability finding |
 | 19 | Topped up `$IMD` with a second real swap, and got the first-ever successful (non-disagreed) real attestation |
 | 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |
+| 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |

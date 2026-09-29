@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { DEALS } from "@/lib/deals";
+import { listDeals } from "@/lib/deals";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
-  const deals = Object.entries(DEALS);
+export default async function Home() {
+  const deals = Object.entries(await listDeals());
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-24">
@@ -20,10 +20,8 @@ export default function Home() {
 
       {deals.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          No deals to show. Real deals don&apos;t exist yet — deployment is blocked on IMD&apos;s unconfirmed
-          payment-signing schema (see <code className="font-mono">docs/DAY-ONE-FINDINGS.md</code>). Run{" "}
-          <code className="font-mono">npm run deploy-demo</code> from <code className="font-mono">site/</code> to deploy
-          and view a real local demo deal.
+          No deals to show. Run <code className="font-mono">npm run deploy-demo</code> from{" "}
+          <code className="font-mono">site/</code> for a local demo deal, or register a real one in Supabase.
         </div>
       ) : (
         <ul className="flex flex-col gap-3">

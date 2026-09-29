@@ -784,6 +784,49 @@ on-chain relay calls (`submitAttestation`, `release`) need real transaction subm
 (`POST /v1/agents/:id/transactions`), a different, not-yet-built Intents API integration — the raw
 `EVM_PRIVATE_KEY` gap in `site/app/api/resolve/[address]/route.ts` is half closed, not fully.
 
+## 21. Real deal storage — Supabase, replacing the hardcoded placeholder
+
+`site/lib/deals.ts` was a hardcoded `STATIC_DEALS = {}` plus a local-only gitignored JSON file since
+the very start of this project — real deal persistence was explicitly out of scope until now. User
+provisioned a real Supabase project; wired it in as the real backing store.
+
+**Real schema created** (`deals` table, RLS enabled with zero policies — locks out the anon/public
+role entirely; only the server-side service role key, used exclusively by this app, can read or
+write it): `address` (primary key), display fields (`title`, `rpc_url`, `chain_id`, `question`,
+`sources`, `panel_size`, `quorum`), and the fields `resolveDeal()` actually needs to act on a deal
+(`oracle_input`, `expected_question_hash`, `payout_estimate_base_units`,
+`approval_threshold_base_units`) — the original `DealMetadata` interface only ever had the display
+fields, which is why the resolve webhook had to carry all of this in every automation callback body
+until now (see §18's design note on that route).
+
+**`lib/supabase.ts`** is a small hand-rolled fetch wrapper over Supabase's REST (PostgREST) API, not
+`@supabase/supabase-js` — consistent with this repo's existing style for `@verdict/imd-client`/
+`@verdict/oneclaw-client` (a documented, stable REST API with two operations needed doesn't warrant
+pulling in the full SDK's realtime/auth/storage surface).
+
+**Two real connection-string gotchas, both from Supabase's dashboard defaulting to the wrong tab for
+scripted one-off migrations**: the "Direct connection" string (`db.<ref>.supabase.co`) doesn't
+resolve from a normal IPv4-only network — Supabase's direct Postgres connections are IPv6-only on
+newer projects — while the "Session pooler" string (`aws-0-<region>.pooler.supabase.com`) does. Took
+two rounds of "try now" before the right tab was actually selected; the wrong host looks like a typo
+or a propagation delay, not a real distinction. This connection string was only ever needed once, for
+the migration — the running app talks to Supabase exclusively through the REST API with the service
+role key, never a direct Postgres connection.
+
+**Route change**: `site/app/api/resolve/[address]/route.ts` now looks the deal up by address instead
+of requiring `oracleInput`/`expectedQuestionHash`/`payoutEstimateBaseUnits` in the automation's
+callback body — live-verified locally (a real inserted row, correct 404 for an unregistered address,
+correct 500 at the signer-missing point for a registered one) and in production against the real
+Vercel deployment. `createDeal()` exists in `lib/deals.ts` for a future "register this deployed
+escrow" step; nothing calls it yet, since `/new` still only produces a signed deployment payload and
+doesn't deploy anything.
+
+The two existing demo entries (`site/lib/demo-deal.local.json`) were deliberately **not** migrated
+into the real table: the local Anvil one only exists while a throwaway local chain is running, and
+the Base mainnet one (§12) is already settled (`Released`) with nothing left to ever resolve — both
+continue to work exactly as before via the local-file path, which `getDealMetadata`/`listDeals`
+still check first.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

@@ -53,13 +53,9 @@ export default async function DealPage({ params }: PageProps) {
     return <ErrorState message={`"${address}" isn't a valid Ethereum address.`} />;
   }
 
-  const metadata = getDealMetadata(address);
+  const metadata = await getDealMetadata(address);
   if (!metadata) {
-    return (
-      <ErrorState
-        message={`No deal metadata found for ${address}. Real deals don't exist yet (deployment is blocked on IMD's unconfirmed payment-signing schema — see docs/DAY-ONE-FINDINGS.md). Run \`npm run deploy-demo\` from site/ to deploy and view a real local demo deal.`}
-      />
-    );
+    return <ErrorState message={`No deal metadata found for ${address}. Run \`npm run deploy-demo\` from site/ for a local demo deal, or register a real one in Supabase.`} />;
   }
 
   let state: EscrowOnChainState;

@@ -50,12 +50,20 @@ and both are server-only.
   ABI is read from the Foundry build artifact (`lib/artifact.ts`), same pattern as `server/resolver`
   — never hand-duplicated, so it can't drift from what's actually deployed. Requires `forge build` to
   have run in `contracts/` first.
-- **Off-chain** (`lib/deals.ts`): the question text, sources, and quorum aren't on-chain (only
-  `questionHash` is) — for now this is a small in-repo registry keyed by escrow address, meant to be
-  populated from `server/oracle-compiler`'s `compileDeal()` output. Two real entries currently live in
-  `lib/demo-deal.local.json` (gitignored, deployed manually alongside the app): a local Anvil demo and
-  the real Base mainnet escrow from `docs/DAY-ONE-FINDINGS.md` §12. A real datastore (not a hand-edited
-  JSON file) is still future work — see the root README's "What's not done".
+- **Off-chain** (`lib/deals.ts` + `lib/supabase.ts`): the question text, sources, quorum, and (for a
+  deal the resolve webhook still needs to act on) `oracleInput`/`expectedQuestionHash`/
+  `payoutEstimateBaseUnits` live in a real Supabase Postgres table (`deals`, RLS enabled with zero
+  policies — only the server-side `SUPABASE_SERVICE_ROLE_KEY` can read/write it; no Supabase Auth in
+  this app, so anon-key/user-scoped RLS policies don't apply). `lib/supabase.ts` is a small hand-rolled
+  fetch wrapper over Supabase's REST (PostgREST) API, not `@supabase/supabase-js` — matching this
+  repo's existing style for `@verdict/imd-client`/`@verdict/oneclaw-client`, and there's nothing here
+  that needs the full SDK's realtime/auth/storage surface. `lib/demo-deal.local.json` (gitignored)
+  still layers local-only entries on top for local dev — a local Anvil demo, ephemeral by nature, so
+  it's never written into the persistent table.
+
+  Nothing writes to `deals` yet from the UI — `createDeal()` exists for a future "register this
+  deployed escrow" step, since `/new` still only produces a signed deployment payload and doesn't
+  deploy anything (see "What this doesn't do" below).
 
 ## Demo deal, for local development
 
@@ -88,9 +96,11 @@ default `vercel deploy` from `site/` doesn't do — full story in `docs/DAY-ONE-
   `lib/artifact.ts`'s dynamically-built path isn't traceable automatically. The glob key needs
   `[address]`'s brackets escaped (`\\[address\\]`) — unescaped, they're glob character-class syntax,
   not literal brackets, and the include silently matches nothing.
-- Real env vars set on the deployment: `RESOLVER_WEBHOOK_SECRET` (the webhook's auth). `EVM_PRIVATE_KEY`
-  is deliberately **not** set — the webhook exists and validates real requests but can't sign/relay
-  until a real key (ideally the 1Claw-backed signer, not a raw one) is added.
+- Real env vars set on the deployment: `RESOLVER_WEBHOOK_SECRET` (the webhook's auth),
+  `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (real deal storage — see "Where the data comes from"
+  above). `EVM_PRIVATE_KEY` is deliberately **not** set — the webhook exists and validates real
+  requests but can't sign/relay until a real key (ideally the 1Claw-backed signer, not a raw one) is
+  added.
 - `lib/demo-deal.local.json`'s Base mainnet entry uses a dRPC key, not the public `mainnet.base.org` —
   the public endpoint works fine locally but was consistently rejected from Vercel's serverless IPs.
 
