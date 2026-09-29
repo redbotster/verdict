@@ -1,11 +1,12 @@
 // Real, live proof that a 1Claw Automation actually reaches a deployed resolver webhook: schedules
 // a manual automation (wait_until -> http, via scheduleResolutionAutomation), waits for it to park
-// and then fire for real, and prints the run's final status. Confirmed 2026-09-29 against
-// https://site-lime-nine-69.vercel.app (a real Vercel deployment, no signer configured there on
-// purpose) — the run failed at "EVM_PRIVATE_KEY is not configured", which is the *correct* outcome:
-// it proves the automation reached the real URL, passed the X-Resolver-Secret header auth check,
-// and reached real application code, stopping cleanly at the one thing deliberately left unconfigured
-// rather than attempting a real payment. See docs/DAY-ONE-FINDINGS.md §18.
+// and then fire for real, and prints the run's final status. Confirmed 2026-09-29 against the real
+// deployed site (no signer configured there on purpose) — the run failed at "EVM_PRIVATE_KEY is not
+// configured", which is the *correct* outcome: it proves the automation reached the real URL, passed
+// the X-Resolver-Secret header auth check, and reached real application code, stopping cleanly at
+// the one thing deliberately left unconfigured rather than attempting a real payment. See
+// docs/DAY-ONE-FINDINGS.md §18. (The deployment URL itself is deliberately not written down in this
+// public repo — it's a live, unauthenticated app.)
 //
 // Not run by CI — creates a real (auto-deleted) automation against a real 1Claw org and a real
 // deployed URL. Run it yourself:

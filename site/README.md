@@ -84,9 +84,10 @@ Anvil PID; kill it when you're done (`kill <pid>`).
 
 ## Deployment (Vercel)
 
-Live at [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app). This is a real
-deployment, and getting it actually working (not just a green build) needed several things a
-default `vercel deploy` from `site/` doesn't do — full story in `docs/DAY-ONE-FINDINGS.md` §18:
+Live on Vercel — the exact URL is deliberately not published in this public repo (`/new` and the
+Supabase writes it triggers are unauthenticated by design; only the resolver webhook checks a
+secret). Getting it actually working (not just a green build) needed several things a default
+`vercel deploy` from `site/` doesn't do — full story in `docs/DAY-ONE-FINDINGS.md` §18:
 
 - The Vercel project's **Root Directory** is set to `site` (via the API — no CLI subcommand for it),
   but `vercel deploy` runs from the **repo root**, so the whole monorepo uploads and the sibling

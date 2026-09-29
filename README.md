@@ -39,8 +39,10 @@ structured outputs for every Anthropic model under that billing path (worked aro
 tool-calling), and the model silently computing relative deadlines ("within 7 days") against the
 wrong date because it was never told what today actually is. See §17.
 
-The site is deployed for real: [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app).
-A real 1Claw Automation has been proven to reach its webhook live (§18). And the disagreement from
+The site is deployed for real, on Vercel (URL not published here — it's a live app with a real IMD
+client and a real Supabase-backed database, unauthenticated except the resolver webhook, so it's
+deliberately not linked from a public repo; ask if you need it). A real 1Claw Automation has been
+proven to reach its webhook live (§18). And the disagreement from
 §15 wasn't the end of the story — a second real paid request, asking a question with only one
 possible source URL to cite instead of two, reached real quorum and produced the first genuinely
 successful attestation this project has seen. See §18–19.
@@ -65,7 +67,7 @@ what was actually compiled, and writes the row for the resolver webhook to use l
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
 | `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end, including the typed-data signer adapter — a real signature through 1Claw's Intents API, independently verified |
 | `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing |
-| `site/` | Status page + dual-approval deal creation + registration + resolver webhook | **Deployed for real** at [site-lime-nine-69.vercel.app](https://site-lime-nine-69.vercel.app), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation |
+| `site/` | Status page + dual-approval deal creation + registration + resolver webhook | **Deployed for real** on Vercel (URL withheld, see above), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 

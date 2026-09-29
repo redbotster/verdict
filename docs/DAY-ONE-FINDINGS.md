@@ -629,9 +629,10 @@ deep merge — patching just `{ allowed_models: [...] }` silently reset `daily_b
 
 ## 18. Deployed `site/` to Vercel for real — a monorepo build, an artifact-tracing bug, and a public-RPC reliability finding
 
-First real deployment of this project anywhere: `https://site-lime-nine-69.vercel.app`, a real
-Vercel project (`kevinkevinjonescrs-projects/site`) linked to this monorepo. Getting a genuinely
-working deployment (not just a green build) took real debugging, not a happy-path `vercel deploy`:
+First real deployment of this project anywhere — a real Vercel project linked to this monorepo (URL
+and account details deliberately withheld from this public doc; it's a live, unauthenticated app).
+Getting a genuinely working deployment (not just a green build) took real debugging, not a
+happy-path `vercel deploy`:
 
 **The monorepo's sibling `file:` packages need the whole repo, not just `site/`.** A CLI deploy run
 from `site/` only uploads that directory — none of `../server/*` comes along, so the `file:../server/*`
