@@ -1,4 +1,4 @@
-import { OneClawClient } from "../../oneclaw-client/src/client.ts";
+import type { Secret, SecretMetadata, SecretType } from "../../oneclaw-client/src/types.ts";
 import { OneClawApiError } from "../../oneclaw-client/src/types.ts";
 import { generateClientToken } from "../../imd-client/src/client.ts";
 
@@ -13,8 +13,21 @@ import { generateClientToken } from "../../imd-client/src/client.ts";
 // dependency on 1Claw at all, so a caller without vault access can keep passing
 // generateClientToken() or their own token directly.
 
+// Narrow interface, not the concrete OneClawClient class — same DI pattern as PaymentSigner and
+// ApprovalGate, so tests can inject a fake without needing a real class instance (OneClawClient's
+// private fields make it non-structurally-fakeable as a plain object).
+export interface VaultClient {
+  getSecret(vaultId: string, path: string): Promise<Secret>;
+  setSecret(
+    vaultId: string,
+    path: string,
+    value: string,
+    opts: { type: SecretType; metadata?: Record<string, unknown> },
+  ): Promise<SecretMetadata>;
+}
+
 export interface VaultConfig {
-  client: OneClawClient;
+  client: VaultClient;
   vaultId: string;
 }
 
@@ -25,11 +38,8 @@ function imdOrderSecretPath(dealId: string): string {
 // Fetches the persisted per-deal IMD token if one exists; otherwise generates a fresh one and
 // stores it, so the next call for the same dealId reuses it instead of minting a new identity.
 //
-// UNCONFIRMED: assumes a missing secret returns 404 (standard REST/RFC 7807 convention, matching
-// this client's OneClawApiError.httpStatus) — not live-verified against the real API. If 1Claw
-// returns a different status for "not found" (e.g. 400 or 422), this will rethrow instead of
-// creating the token on first use; run oneclaw-client's live-smoke script against a fresh path to
-// confirm before relying on this in production.
+// Confirmed live 2026-09-29: a missing secret returns 404 with
+// {"type":"about:blank","title":"Not Found","status":404,"detail":"Secret <path> not found"}.
 export async function loadOrCreateImdToken(vault: VaultConfig, dealId: string): Promise<string> {
   const path = imdOrderSecretPath(dealId);
   try {

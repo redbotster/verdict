@@ -10,5 +10,7 @@ export { fetchOracleAttestation, UnconfirmedOracleResultShapeError } from "./ora
 export { attestationDomain, ATTESTATION_TYPES } from "./eip712.ts";
 export { loadMilestoneEscrowArtifact } from "./artifact.ts";
 export { loadOrCreateImdToken, loadGithubPublishToken } from "./vaultSecrets.ts";
-export type { VaultConfig } from "./vaultSecrets.ts";
+export type { VaultConfig, VaultClient } from "./vaultSecrets.ts";
+export { scheduleResolutionAutomation, cancelScheduledResolution } from "./automation.ts";
+export type { AutomationClient, ScheduleResolutionOptions, ScheduledResolution } from "./automation.ts";
 export type { AttestationMessage, SignedAttestation, EscrowRef } from "./types.ts";

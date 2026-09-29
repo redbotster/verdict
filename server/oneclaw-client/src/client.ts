@@ -1,14 +1,21 @@
 import type {
   AccessToken,
   Agent,
+  Automation,
+  AutomationRun,
   CreateAgentResult,
+  CreateAutomationInput,
+  EIP712TypedData,
   Policy,
   PolicyPermission,
   PrincipalType,
   Secret,
   SecretMetadata,
   SecretType,
+  SignResult,
+  SigningKey,
   Vault,
+  WorkflowStep,
   OneClawErrorBody,
 } from "./types.ts";
 import { OneClawApiError } from "./types.ts";
@@ -189,6 +196,18 @@ export class OneClawClient {
     return parseJsonOrThrow<Agent>(res);
   }
 
+  // Partial update — e.g. { intents_api_enabled, eip712_domain_allowlist, eip712_default_policy,
+  // shroud_config }. Not fully enumerated in types.ts since the set of patchable fields is large
+  // and growing; callers pass exactly the fields they mean to change.
+  async updateAgent(agentId: string, patch: Record<string, unknown>): Promise<Agent> {
+    const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}`, {
+      method: "PATCH",
+      headers: await this.headers(),
+      body: JSON.stringify(patch),
+    });
+    return parseJsonOrThrow<Agent>(res);
+  }
+
   async deleteAgent(agentId: string): Promise<void> {
     const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}`, {
       method: "DELETE",
@@ -228,4 +247,127 @@ export class OneClawClient {
     const body = await parseJsonOrThrow<{ policies: Policy[] } | Policy[]>(res);
     return Array.isArray(body) ? body : body.policies;
   }
+
+  // --- Automations ---
+
+  async createAutomation(input: CreateAutomationInput): Promise<Automation> {
+    const res = await fetch(`${BASE_URL}/v1/automations`, {
+      method: "POST",
+      headers: await this.headers(),
+      body: JSON.stringify(input),
+    });
+    return parseJsonOrThrow<Automation>(res);
+  }
+
+  async getAutomation(id: string): Promise<Automation> {
+    const res = await fetch(`${BASE_URL}/v1/automations/${encodeURIComponent(id)}`, {
+      headers: await this.headers(),
+    });
+    return parseJsonOrThrow<Automation>(res);
+  }
+
+  async deleteAutomation(id: string): Promise<void> {
+    const res = await fetch(`${BASE_URL}/v1/automations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: await this.headers(),
+    });
+    await parseJsonOrThrow<void>(res);
+  }
+
+  // idempotencyKey lets a caller retry a trigger request safely — the same key returns the
+  // already-started run with 200 instead of starting a second one.
+  async triggerAutomation(id: string, opts: { input?: unknown; idempotencyKey?: string } = {}): Promise<AutomationRun> {
+    const headers = await this.headers();
+    if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+    const res = await fetch(`${BASE_URL}/v1/automations/${encodeURIComponent(id)}/trigger`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ input: opts.input }),
+    });
+    return parseJsonOrThrow<AutomationRun>(res);
+  }
+
+  async getAutomationRun(automationId: string, runId: string): Promise<AutomationRun> {
+    const res = await fetch(
+      `${BASE_URL}/v1/automations/${encodeURIComponent(automationId)}/runs/${encodeURIComponent(runId)}`,
+      { headers: await this.headers() },
+    );
+    return parseJsonOrThrow<AutomationRun>(res);
+  }
+
+  async listAutomationRuns(automationId: string): Promise<AutomationRun[]> {
+    const res = await fetch(`${BASE_URL}/v1/automations/${encodeURIComponent(automationId)}/runs`, {
+      headers: await this.headers(),
+    });
+    const body = await parseJsonOrThrow<{ runs: AutomationRun[] } | AutomationRun[]>(res);
+    return Array.isArray(body) ? body : body.runs;
+  }
+
+  // Human-only per docs — an agent-authenticated client gets 403. Only "running" or
+  // "awaiting_approval" runs are cancellable.
+  async cancelAutomationRun(automationId: string, runId: string): Promise<void> {
+    const res = await fetch(
+      `${BASE_URL}/v1/automations/${encodeURIComponent(automationId)}/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST", headers: await this.headers() },
+    );
+    await parseJsonOrThrow<void>(res);
+  }
+
+  // --- Intents API (signing) ---
+
+  async createSigningKey(agentId: string, chain: string): Promise<SigningKey> {
+    const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/signing-keys`, {
+      method: "POST",
+      headers: await this.headers(),
+      body: JSON.stringify({ chain }),
+    });
+    return parseJsonOrThrow<SigningKey>(res);
+  }
+
+  async listSigningKeys(agentId: string): Promise<SigningKey[]> {
+    const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/signing-keys`, {
+      headers: await this.headers(),
+    });
+    const body = await parseJsonOrThrow<{ keys: SigningKey[] } | SigningKey[]>(res);
+    return Array.isArray(body) ? body : body.keys;
+  }
+
+  async deactivateSigningKey(agentId: string, chain: string): Promise<void> {
+    const res = await fetch(
+      `${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/signing-keys/${encodeURIComponent(chain)}`,
+      { method: "DELETE", headers: await this.headers() },
+    );
+    await parseJsonOrThrow<void>(res);
+  }
+
+  // Unified sign endpoint — personal_sign, typed_data, eip712_digest, or transaction. The agent's
+  // eip712_domain_allowlist (or eip712_default_policy: "allow") must cover a typed_data domain's
+  // verifyingContract, and raw_signing_enabled must be set for eip712_digest (human-set only).
+  async sign(
+    agentId: string,
+    request:
+      | { intent_type: "personal_sign"; chain: string; message: string }
+      | { intent_type: "typed_data"; chain: string; typed_data: EIP712TypedData }
+      | { intent_type: "eip712_digest"; chain: string; hash: `0x${string}` },
+  ): Promise<SignResult> {
+    const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/sign`, {
+      method: "POST",
+      headers: await this.headers(),
+      body: JSON.stringify(request),
+    });
+    return parseJsonOrThrow<SignResult>(res);
+  }
+}
+
+// --- Workflow step builders (Automations) ---
+
+export function waitUntilStep(until: string, opts: { name?: string } = {}): WorkflowStep {
+  return { type: "wait_until", until, ...opts };
+}
+
+export function httpStep(
+  url: string,
+  opts: { name?: string; method?: string; headers?: Record<string, string>; body?: unknown } = {},
+): WorkflowStep {
+  return { type: "http", url, method: opts.method ?? "POST", headers: opts.headers, body: opts.body, name: opts.name };
 }

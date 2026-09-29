@@ -4,10 +4,12 @@ A thin, hand-rolled client for [1Claw](https://1claw.co)'s Vaults/Agents Human A
 (`api.1claw.co`) — the same shape as `@verdict/imd-client`: no SDK dependency, just `fetch`
 and the documented request/response shapes, typed.
 
-This is the "vault side" from `docs/SPEC.md`'s 1Claw integration table: hold IMD paid
+Covers three of the spec's 1Claw integration table rows: the **vault side** (hold IMD paid
 tokens, GitHub tokens, and LLM keys in a 1Claw vault instead of raw environment variables,
-and let an agent (the resolver) fetch only what its policy grants, never seeing secrets it
-doesn't need.
+and let an agent fetch only what its policy grants), **Automations** (fire a workflow at a
+deal's deadline), and the generic half of the **Intents API** (sign transactions/typed data
+without the agent holding a raw private key). See `@verdict/resolver`'s
+`automation.ts`/`permit2.ts` for how the resolver package builds on top of these.
 
 ## What's confirmed vs. what's docs-only
 
@@ -38,14 +40,23 @@ a failure partway through) unless `--keep` is passed. Run it yourself:
 ONE_CLAW_API_KEY=$(grep -oP '(?<=^ONE_CLAW_API_KEY=).*' ~/.secrets/verdict.env) npm run live-smoke
 ```
 
-## What this does NOT do
+## Automations and Intents API
 
-This package only covers the **vault side**: secrets, agents, and policies. It
-deliberately does not implement 1Claw's **Intents API** (on-chain/typed-data signing) —
-that's the half of the project's IMD-payment blocker that was investigated and parked (see
-`docs/DAY-ONE-FINDINGS.md` §7): 1Claw's signer is generic and doesn't know IMD's
-`quoteApprovalTypedData` schema, so wiring it up would still mean guessing at that schema,
-which this project's whole history has been careful not to do.
+Added 2026-09-29, both live-verified against the real API:
+
+- **Automations** (`createAutomation`, `triggerAutomation`, `getAutomationRun`,
+  `cancelAutomationRun`, plus `waitUntilStep`/`httpStep` builders) — create/trigger/poll/cancel
+  all confirmed working exactly as documented, no doc gaps found. See
+  `@verdict/resolver`'s `automation.ts` for the resolver-specific
+  `scheduleResolutionAutomation()` built on top.
+- **Intents API** (`createSigningKey`, `sign`, `updateAgent`, etc.) — the signing mechanism
+  itself is generic: `POST /v1/agents/:id/sign` takes an arbitrary `{domain, types,
+  primaryType, message}` document and doesn't know IMD's `quoteApprovalTypedData` schema, so
+  using it for IMD's actual payment still means getting that schema from IMD first (parked,
+  see `docs/DAY-ONE-FINDINGS.md` §7). What IS built and live-tested: `@verdict/resolver`'s
+  `permit2.ts` uses this client to sign a real, publicly-confirmed Permit2 `PermitTransferFrom`
+  — see its own README section for a live-API gate found in the process (`intents_api_enabled`
+  is PATCHable but doesn't actually enable signing; that specific toggle is dashboard-only).
 
 ## Auth
 

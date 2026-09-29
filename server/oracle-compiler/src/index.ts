@@ -2,6 +2,8 @@ export { compileDeal, pinQuestion, approvalSummaryFromOrder } from "./compile.ts
 export type { CompileOptions } from "./compile.ts";
 export { extractDealFields } from "./extract.ts";
 export type { ExtractFn, ExtractOptions } from "./extract.ts";
+export { shroudAnthropicModel } from "./shroud.ts";
+export type { ShroudModelOptions } from "./shroud.ts";
 export { lintDealText, lintSourceUrl, lintSourceUrls } from "./lint.ts";
 export type { LintFinding } from "./lint.ts";
 export { TEMPLATES, releasePublishedTemplate, pageOrFileLiveTemplate, onchainEventTemplate } from "./templates/index.ts";

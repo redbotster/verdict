@@ -57,10 +57,48 @@ convenience for callers that have a vault configured: fetch (or mint-and-persist
 the secret, then pass its value into `resolveDeal()` like any other token. A caller without vault
 access can keep calling `generateClientToken()` directly, exactly as `e2e-demo.ts` does today.
 
-**Not live-verified**: `loadOrCreateImdToken`'s "create if missing" branch assumes a missing secret
-returns HTTP 404 (standard REST/RFC 7807 convention) — this has not been confirmed against the real
-API. Run `oneclaw-client`'s `npm run live-smoke` against a fresh vault/path to confirm before relying
-on this in production.
+**Live-verified 2026-09-29**: a missing secret does return 404 (confirmed directly, not assumed —
+`loadOrCreateImdToken`'s "create if missing" branch works as written) — see
+`docs/DAY-ONE-FINDINGS.md` §8. Full unit coverage in `test/vaultSecrets.test.ts` (fake `VaultClient`,
+no network).
+
+## Scheduling resolution (`src/automation.ts`)
+
+Implements the spec's other 1Claw row: "Fire at the deadline | Automations | One cron or webhook
+trigger per deal, created when the deployment goes live, calling the resolver."
+`scheduleResolutionAutomation()` creates a 1Claw automation whose workflow is `wait_until(deadline)`
+followed by an `http` call to a resolver webhook URL you host (a route that calls `resolveDeal()`
+server-side) — all the actual IMD/chain logic stays in this package, matching the spec's framing
+exactly. `cancelScheduledResolution()` lets an early settlement cancel a still-parked run.
+
+**Live-verified 2026-09-29** end to end against the real `api.1claw.co`: create automation → trigger
+→ poll to `success`, and separately, a `wait_until` park → confirmed `status: "running"` while
+parked (not a distinct "waiting" state, despite that word in 1Claw's own prose) → cancellable in
+that state. Full unit coverage in `test/automation.test.ts` (fake `AutomationClient`, no network).
+No doc/reality gaps found this time — see `docs/DAY-ONE-FINDINGS.md` §7–9 for the ones found earlier
+building the vault side.
+
+## Permit2 signing via 1Claw's Intents API (`src/permit2.ts`)
+
+The generic, publicly-verifiable half of IMD's "Permit2" payment scheme: `permit2TypedData()` builds
+a real Permit2 `PermitTransferFrom` EIP-712 document (domain, types, and the canonical
+`0x000000000022D473030F116dDEE9F6B43aC78BA3` address all confirmed directly from Uniswap's public
+`permit2` repo and `@uniswap/permit2-sdk` — **not** from the `x402` npm package, which turns out to
+have zero Permit2 support despite last being described that way; see
+`docs/DAY-ONE-FINDINGS.md` §10 for the correction). `signPermit2Transfer()` signs it through 1Claw's
+generic Intents API; `verifyPermit2Signature()` independently checks the result with viem rather than
+trusting the signer's own response.
+
+**What's proven vs. what's still open**: `scripts/permit2-demo.ts` proves the schema and code are
+correct — a real signature, independently verified. The *live* 1Claw signing path hit a real gate:
+`PATCH /v1/agents/:id` accepts and echoes back `intents_api_enabled: true`, but the sign endpoint
+still 403s with "a human operator must enable it... at https://1claw.co/agents" — that specific gate
+is dashboard-only, not API-settable, confirmed by retrying after real elapsed time (not a propagation
+race). The script falls back to a local viem account to still prove the schema/signature is correct.
+Flip that dashboard toggle for an agent and re-run to get the live 1Claw proof too. Either way, this
+is still **not** IMD's actual integration — the real `spender`, nonce source, and whether a witness
+(`PermitWitnessTransferFrom`) is required are unconfirmed and not guessed at (see
+`paymentSigner.ts` and `docs/DAY-ONE-FINDINGS.md`).
 
 ## What's real and tested
 
@@ -106,5 +144,7 @@ contract, not asserted by the script.
 ```
 npm install
 npm run typecheck
-npm test   # includes the Anvil integration test; requires `forge build` in ../../contracts first
+npm test         # includes the Anvil integration test; requires `forge build` in ../../contracts first
+npm run e2e-demo
+ONE_CLAW_API_KEY=$(grep -oP '(?<=^ONE_CLAW_API_KEY=).*' ~/.secrets/verdict.env) npm run permit2-demo
 ```

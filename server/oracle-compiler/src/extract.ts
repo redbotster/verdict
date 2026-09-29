@@ -1,4 +1,5 @@
 import { generateText, Output } from "ai";
+import type { LanguageModel } from "ai";
 import { z } from "zod";
 import type { Extraction } from "./types.ts";
 
@@ -28,7 +29,12 @@ const ExtractionSchema = z.object({
 });
 
 export interface ExtractOptions {
-  model?: string;
+  /**
+   * A Vercel AI Gateway model id string (the default path), or a real LanguageModel instance —
+   * e.g. shroudAnthropicModel({...}) from ./shroud.ts, to route this call through 1Claw's Shroud
+   * for prompt-injection/secret-redaction inspection before it reaches the model. See shroud.ts.
+   */
+  model?: string | LanguageModel;
   /** For retries after a rejected dry-run: prior IMD error text appended to steer re-extraction. */
   priorError?: string;
 }

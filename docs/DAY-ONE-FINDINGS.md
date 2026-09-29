@@ -151,16 +151,20 @@ real result:
   EIP-712 domain/types for the quote-approval signature — `quoteApprovalTypedData()` builds that
   client-side from this JSON, and its construction is not published anywhere we could find.
 - **`quoteApprovalTypedData` is confirmed not public.** A GitHub code search returns zero hits for that
-  exact symbol. `x402` itself (the payment-payload half, `createPaymentPayload`) is a real, public npm
-  package (`x402-foundation/x402` on GitHub) implementing the standard x402/Permit2 payment signature —
-  that half is derivable from public docs. The quote-approval half is IMD's own private wrapper, not
-  part of the public x402 spec, and no `@identitymd/*` package exists on the public npm registry (only
-  a scope name seen in IMD's docs prose, not a resolvable install target).
+  exact symbol. `x402` itself is a real, public npm package (`x402-foundation/x402` on GitHub), and
+  its outer envelope (challenge shape, `resource`/`accepts`/`quote`) matches what IMD sends — but
+  **correction, see §10**: the package's actual "exact" scheme implementation is USDC/EIP-3009-only
+  and has zero Permit2 support, so it does not in fact give a buildable payment-payload half the way
+  this entry originally claimed. No `@identitymd/*` package exists on the public npm registry either
+  (only a scope name seen in IMD's docs prose, not a resolvable install target).
 
-**Net effect on the project's biggest blocker**: half of the required signature (the x402/Permit2
-payment payload) is now buildable against a real, documented, public library. The other half (the
-quote-approval EIP-712 wrapper) still needs to come from IMD directly — support, partnership docs, or
-a published SDK — before `ImdClient.pay()` can be implemented for real. Do not guess at it.
+**Net effect on the project's biggest blocker**: neither half of the two-signature flow is derivable
+from a public library as-is (see §10 for the full correction) — both the Permit2 payment payload's
+IMD-specific parameters and the quote-approval EIP-712 wrapper still need to come from IMD directly —
+support, partnership docs, or a published SDK — before `ImdClient.pay()` can be implemented for real.
+What §10 *does* establish: Permit2's own public schema (independent of IMD or x402) is confirmed and
+implemented in `server/resolver/src/permit2.ts`, ready to slot in once IMD's specific parameters are
+known. Do not guess at either schema.
 
 ## 8. `ONE_CLAW_API_KEY` in `~/.secrets/1claw.env` was stale; a fresh key (in `~/.secrets/verdict.env`) works
 
@@ -197,15 +201,157 @@ Net effect: the vault side is now genuinely live-verified, not just typechecked 
 `npm run live-smoke` in `server/oneclaw-client` passes end to end, self-cleaning, against the real
 `api.1claw.co`.
 
+## 10. Correction to §7: the public `x402` package has zero Permit2 support — and 1Claw's Intents API needs a dashboard toggle, not just an API flag
+
+Two findings while building `server/resolver/src/permit2.ts` (2026-09-29), one a correction to a
+claim made in this doc's earlier (now-superseded) version of §7/§9:
+
+- **Correction**: last session's finding said "`x402`... is a real, public npm package... that half
+  [the payment payload] is derivable from public docs." That's wrong in an important way. The
+  installed `x402@1.2.0` package's EVM "exact" scheme (`x402/schemes`, `x402/client`,
+  `x402/shared/evm`) is **entirely USDC/EIP-3009 (`transferWithAuthorization`) specific** —
+  `selectPaymentRequirements`'s own doc comment says "Default behavior is to select the first
+  payment requirement that has a USDC asset," and `verify`/`settle` explicitly check "USDC contract
+  address," "permit deadline," "USDC balance." A repo-wide grep for `Permit2`/`permit2` across the
+  package turns up nothing except an unrelated string inside a bundled wallet-UI widget. **The
+  public x402 package cannot build IMD's Permit2 payment payload at all** — IMD's `$IMD` token
+  doesn't support EIP-3009, so IMD's `extra: {assetTransferMethod: "permit2"}` is IMD's own
+  extension beyond what the reference x402 implementation does, not a documented public mechanism.
+- **What IS real and public**: Permit2 itself (Uniswap's contract, not x402's). Confirmed directly
+  from `github.com/Uniswap/permit2` (`src/libraries/PermitHash.sol`, `src/EIP712.sol`) and the
+  official `@uniswap/permit2-sdk` npm package (`src/domain.ts`, `src/signatureTransfer.ts`): domain
+  `{name: "Permit2", chainId, verifyingContract}` (no `version` field), canonical address
+  `0x000000000022D473030F116dDEE9F6B43aC78BA3` (same on every chain except zkSync), and the
+  `PermitTransferFrom{permitted: TokenPermissions, spender, nonce, deadline}` /
+  `TokenPermissions{token, amount}` type pair for a single-use signature-transfer permit. Built as
+  `server/resolver/src/permit2.ts`'s `permit2TypedData()` — this part is genuinely public and
+  confirmed, unlike IMD's own wrapper around it.
+- **1Claw's Intents API has a dashboard-only gate the API can't flip.** `PATCH /v1/agents/:id` with
+  `{intents_api_enabled: true}` returns 200 and a subsequent `GET` correctly echoes back
+  `intents_api_enabled: true` — but calling `POST /v1/agents/:id/sign` on that same agent still
+  403s: `{"detail":"Intents API is not enabled for this agent. A human operator must enable it in
+  the agent settings at https://1claw.co/agents."}`. Confirmed not a propagation-delay race (retried
+  after real elapsed time, same result). The `intents_api_enabled` field is evidently a different,
+  API-settable flag from whatever dashboard toggle the sign endpoint actually checks — the docs
+  don't distinguish the two.
+- **What this means for `permit2.ts`**: the schema and code are correct and complete (proven via
+  `resolver/scripts/permit2-demo.ts`'s fallback path — a local viem account signs the exact same
+  typed-data document produced by `permit2TypedData()` and the signature verifies correctly), but
+  the *live* 1Claw signing path is blocked on a one-time manual dashboard action, not on anything
+  fixable in code. `signPermit2Transfer()` and `verifyPermit2Signature()` are ready to use for real
+  the moment an agent has Intents API enabled via `1claw.co/agents`.
+- **Still unconfirmed regardless**: IMD's actual `spender` (their `payTo` directly, or an
+  intermediary?), nonce source, and whether they require `PermitWitnessTransferFrom` (binding the
+  permit to a specific `quoteHash`) instead of the plain `PermitTransferFrom` used here. None of
+  that is guessed at — `permit2-demo.ts`'s test values are explicitly labeled as plausible-but-
+  unconfirmed, not as IMD's real integration.
+
+## 11. Acquired real `$IMD` via a hand-rolled Uniswap v4 swap — real transaction, on mainnet
+
+At the user's explicit request (2026-09-29), swapped 0.0015 ETH for `$IMD` directly against the real
+Uniswap v4 pool on Ethereum mainnet, since every convenient swap-quote API (0x, 1inch, Uniswap's own
+trade API) now requires an API key none of which were available. Built from Uniswap's official SDKs
+(`@uniswap/universal-router-sdk`, `@uniswap/v4-sdk`, `@uniswap/sdk-core`) and real on-chain reads —
+nothing guessed:
+
+- **The pool's `PoolKey` isn't public anywhere** — DexScreener's `pairAddress` for a v4 pool is
+  actually the 32-byte `PoolId` (`keccak256(abi.encode(poolKey))`), not a contract. Recovered the
+  real `fee` (10000, i.e. 1%), `tickSpacing` (200), and `hooks` (`0x0` — a plain, hookless pool) by
+  reading `PoolManager`'s own `Initialize` event log for that exact pool ID directly
+  (`0x000000000004444c5dc75cB358380D2e3dE08A90` on mainnet, from `docs.uniswap.org/contracts/v4/deployments`)
+  and independently verified by recomputing `keccak256(abi.encode(poolKey))` locally — it reproduced
+  the exact DexScreener pool ID byte for byte.
+- **Public free-tier `eth_getLogs` is far more restrictive than expected** in 2026: publicnode
+  treats any non-latest `eth_getLogs` as an "archive" request requiring a paid token regardless of
+  range size; drpc.org and cloudflare-eth.com both errored on ranges that should have been within
+  their stated limits. `rpc.mevblocker.io` was the one that actually worked, on a ~30-block window
+  pinpointed by binary-searching block timestamps against the pool's `pairCreatedAt` estimate.
+- **`SwapRouter.encodeSwaps`'s V4 settle/take actions differ by custody mode, and native ETH input
+  is incompatible with `allowDirectTransfers`.** Confirmed by hitting three real SDK validation
+  errors in sequence: `SETTLE_ALL_REQUIRES_DIRECT_TRANSFERS` (plain `SETTLE_ALL`/`TAKE_ALL` need
+  `allowDirectTransfers: true`), then `DIRECT_TRANSFERS_NATIVE_INPUT` (that mode explicitly rejects
+  a native-ETH input, since there's nothing to "pull" — ETH only arrives via `msg.value`). The
+  working pattern for a plain "swap my own ETH for a token, router holds custody" case:
+  `v4Actions: [SWAP_EXACT_IN_SINGLE, {action:"SETTLE", currency: ethAddress, amount: CONTRACT_BALANCE,
+  payerIsUser: false}, {action:"TAKE", currency: tokenAddress, recipient: ROUTER_AS_RECIPIENT, amount: 0}]`
+  — `CONTRACT_BALANCE` and `amount: 0` (`OPEN_DELTA`) are real sentinels exported by
+  `@uniswap/universal-router-sdk`, not arbitrary values.
+- **Simulated before sending** (`eth_call` with the exact calldata/value from an unsigned wallet
+  context) and only broadcast after that succeeded cleanly.
+
+**Result**: real transaction
+[`0x131e6a1c45b3ee3c8ab93161f0e1218eafcd3d466690eeca5e79fb6114f57876`](https://etherscan.io/tx/0x131e6a1c45b3ee3c8ab93161f0e1218eafcd3d466690eeca5e79fb6114f57876),
+confirmed in block 26083768, `status: success`. The ops wallet
+(`0xF57CfAF1f2b12E7f23C342c4fAfd675379840668`) went from 0 to **0.5172 `$IMD`** — just over one
+IMD action's worth (0.5 IMD) at the live quote. This is real `$IMD`, ready for whenever the payment
+schema (§10) is resolved — it still can't be spent on a real oracle request without that. The
+one-off swap script itself lived in a scratch directory outside the repo (wallet- and
+amount-specific, not reusable product code) and was deleted after the swap completed; this write-up
+plus the on-chain transaction are the durable record.
+
+## 12. `MilestoneEscrow.sol`'s full real lifecycle, proven on Base mainnet with real money
+
+At the user's explicit request (2026-09-29): a small, deliberately self-dealing demo (one wallet
+plays payer, payee, fee recipient, deployer, and resolver — explicitly **not** a real deal between
+real counterparties), permanently scripted at `server/resolver/scripts/base-mainnet-demo.ts` since
+unlike the swap script this proves the actual product contract, not a one-off treasury operation.
+First got a small real stablecoin balance the same hand-rolled way as §11 (Universal Router,
+WRAP_ETH + V3_SWAP_EXACT_IN this time, real USDC on Base — `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`,
+confirmed via DexScreener), then ran the escrow through its entire real lifecycle: deploy (bound to
+a real, free IMD `questionHash`) → a real EIP-712 `true` attestation, signed by a throwaway local
+key standing in for IMD's real oracle signer (which this project still can't use — see §10) →
+`release()` after the real challenge window elapsed → `withdraw()`. **Final confirmed on-chain
+state**: `state() == 1` (Released), `trueAt` a real non-zero timestamp, and the full 2.166484 USDC
+back in the wallet — the contract genuinely moved real money through its entire true-path lifecycle
+and returned it, exactly as designed.
+
+Three real, reproducible findings from getting there — all about `mainnet.base.org`'s public RPC,
+not about the contract or the resolver code, but costly to discover blind:
+
+- **The V3 swap needed an explicit Universal Router version.** `SwapRouter.encodeSwaps` defaults to
+  an older command-encoding format unless told which deployed router version to target via
+  `urVersion` — sending that older 4-field `V3_SWAP_EXACT_IN` encoding to the actual deployed
+  `2.1.2` router (which decodes 6 fields: `recipient, amountIn, amountOutMin, path, payerIsUser,
+  minHopPriceX36`) reverted with the real on-chain `SliceOutOfBounds()` error (decoded by matching
+  its selector against `BytesLib.sol`'s source, same method as §11's V4 errors). Fixed by setting
+  `urVersion: UniversalRouterVersion.V2_1_2` explicitly.
+- **`mainnet.base.org`'s public RPC has real, visible eventual-consistency lag across its backend
+  nodes.** Hit this three separate times in one run: (1) a contract deploy's constructor
+  `transferFrom` reverted with "exceeds allowance" even though the correct allowance was already
+  confirmed on-chain, because the node that served the deploy's preflight simulation hadn't yet
+  caught up to the just-mined `approve`; (2) `release()` reverted with `NotYetTrue()` on a node that
+  hadn't yet seen the just-mined `submitAttestation`; (3) `withdraw()` reverted with `NothingOwed()`
+  on a node that hadn't yet seen a just-mined `reclaim()`. All three succeeded immediately on retry.
+  Worse: a `getBlock()` timestamp read minutes before it was used (for an attestation's `issuedAt`)
+  came from a node running **~2 minutes ahead** of the nodes that later mined the actual
+  transactions, tripping the contract's own `BadIssuedAt()` replay-safety check for real (`issuedAt
+  > block.timestamp` at execution) — not a simulation artifact, an actually-mined, actually-reverted
+  transaction. Mitigation: read timestamps fresh, immediately before use, rather than reusing an
+  early one, and add a short settle delay after each write before the next dependent read/write.
+- **A non-throwing `waitForTransactionReceipt` does not mean success.** It returns the receipt
+  regardless of `status`, so the `BadIssuedAt()` revert above went completely unnoticed by the first
+  version of this script — it logged a false "submitAttestation() — real tx" success and pressed on
+  to `release()`, which correctly failed. Real cost: one throwaway escrow (`0x2754b3...`) got
+  permanently stuck in `Funded` state, since its `oracleSigner` was an in-memory-only throwaway key
+  never persisted — unrecoverable once the process exited having never actually recorded a `true`
+  attestation. Recovered the funds via `reclaim()` once `deadline + grace` elapsed (by design — the
+  same safety mechanism a real stuck deal would use), no money lost. Fixed by checking
+  `receipt.status === "success"` explicitly after every write, and by printing the throwaway oracle
+  key up front as a safety net in case a real bug (not just a transient RPC issue) leaves a deal
+  needing the same key again mid-run.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - The exact EIP-712 `quoteApprovalTypedData` schema (domain/types) IMD expects for the second
-  signature in step 5. The 402 challenge body only exposes `extra: {"assetTransferMethod":
+  signature in step 5, **and** the exact Permit2 integration parameters (spender, nonce source,
+  witness data) for the first. The 402 challenge body only exposes `extra: {"assetTransferMethod":
   "permit2"}` — it does not include a full typed-data document to sign as-is. IMD's own reference
   implementation (`Identity-md/protocol`, `apps/control-plane/src/paid-access/x402.ts`) is not a
-  public repo (`gh api repos/Identity-md/protocol` → 404), so this could not be verified from here.
-  **Do not guess at this schema and wire up real signing** — get it from IMD directly (partnership
-  docs, support, or a published SDK) before attempting `ImdClient.pay()` for real.
+  public repo (`gh api repos/Identity-md/protocol` → 404), so this could not be verified from here,
+  and (per §10) the public `x402` package doesn't implement Permit2 at all, so it can't be verified
+  from there either. **Do not guess at either schema and wire up real signing** — get them from IMD
+  directly (partnership docs, support, or a published SDK) before attempting `ImdClient.pay()` for
+  real.
 - ~~Whether 1Claw's Intents API can actually produce that signature~~ — answered in §7: yes,
   mechanically (it's a generic EIP-712 signer via `POST /v1/agents/:id/sign`), but only once we have
   the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema.

@@ -12,7 +12,11 @@ closing note.
 **End-to-end proof** that the pieces actually compose (not just pass their own tests):
 [`server/resolver/scripts/e2e-demo.ts`](server/resolver/README.md#end-to-end-demo-scriptse2e-demots)
 compiles a real question against the live IMD API, deploys the real contract bound to IMD's actual
-`questionHash`, and relays/settles it — real at every step except the one that costs real money.
+`questionHash`, and relays/settles it — real at every step except the one that costs real money
+(local Anvil chain). **Proof that also holds with real money**:
+[`server/resolver/scripts/base-mainnet-demo.ts`](server/resolver/README.md) ran the same contract's
+full lifecycle for real on Base mainnet — deploy, a real signed attestation, `release()`,
+`withdraw()` — ending in confirmed `Released` state with real USDC returned to the wallet.
 
 ## Layout
 
@@ -22,15 +26,19 @@ compiles a real question against the live IMD API, deploys the real contract bou
   intentionally left unimplemented pending IMD's real signing schema (see findings doc).
 - `server/oracle-compiler/` — the English-deal-to-oracle-question compiler: extract → match a vetted
   template → lint → free dry-run quote. All three templates now live-verified against `api.imd.fun`.
-- `server/oneclaw-client/` — the server-side client for 1Claw's real Vaults/Agents Human API
-  (`api.1claw.co`, confirmed live 2026-09-29 — the real domain is `1claw.co`, not `1claw.ai`; see
-  findings doc §7). Covers the "vault side": vaults, secrets, agents, policies. Deliberately does not
-  cover 1Claw's Intents API (typed-data signing) — that's parked pending IMD's own payment schema.
+- `server/oneclaw-client/` — the server-side client for 1Claw's real Vaults/Agents/Automations/
+  Intents Human API (`api.1claw.co`, confirmed live 2026-09-29 — the real domain is `1claw.co`, not
+  `1claw.ai`; see findings doc §7). Vaults, secrets, agents, policies, automations, and generic
+  EIP-712/transaction signing are all live-verified. Does not know IMD's specific payment schema —
+  that's parked pending IMD's own docs (see below).
 - `server/resolver/` — the agent that acts at a deal's deadline: relays the signed attestation and
   settles the escrow. Chain interaction is real and integration-tested against the actual compiled
-  contract on a local Anvil chain; `src/vaultSecrets.ts` optionally persists the per-deal IMD token in
-  a 1Claw vault instead of a raw env var. The IMD payment-signing and oracle-result-fetching steps are
-  stubbed pending the same unconfirmed schemas noted above.
+  contract on a local Anvil chain, **and proven for real on Base mainnet**
+  (`scripts/base-mainnet-demo.ts`, see findings doc §12). `src/vaultSecrets.ts` and
+  `src/automation.ts` wire in 1Claw's vault and automations side; `src/permit2.ts` implements real
+  Permit2 signing via 1Claw's Intents API. The IMD payment-signing (both halves — Permit2's IMD-
+  specific parameters and the quote-approval schema) and oracle-result-fetching steps are stubbed
+  pending IMD's own docs — see findings doc §10.
 - `site/` — Next.js App Router. The per-deal status page (`/deals/[address]`), read-only,
   server-rendered directly from live contract state via viem; and `/new`, the spec's dual-approval
   flow — compile a real question against the live IMD API, payee connects, payer signs the exact
@@ -45,7 +53,9 @@ the full six-week shape. What exists right now:
 - Project structure and the full spec/findings docs.
 - A dedicated ops/resolver wallet, freshly generated, stored at `~/.secrets/verdict.env` (never
   committed). No longer unfunded: `0xF57CfAF1f2b12E7f23C342c4fAfd675379840668` holds real ETH on
-  both Base mainnet (~$5) and Ethereum L1 mainnet (0.01 ETH), confirmed on-chain 2026-09-29 — see
+  both Base mainnet (~$5) and Ethereum L1 mainnet, **and real `$IMD`** (0.5172 IMD) acquired via a
+  real, hand-rolled Uniswap v4 swap — see `docs/DAY-ONE-FINDINGS.md` §11 for the transaction and the
+  real on-chain research (pool key recovery, SDK validation errors) that went into it. See
   "What's deliberately not done yet" below for what that does and doesn't unblock.
 - `MilestoneEscrow.sol` + Foundry tests (56/56 passing, up from the original 36). A follow-up security
   audit plus a Slither pass (see above) found and fixed every issue raised: the payer signs the exact
@@ -113,6 +123,32 @@ the full six-week shape. What exists right now:
   agent/vault binding behavior diverges from `docs.1claw.co`'s own reference page for `POST
   /v1/agents` in two ways — an undocumented required `vault_ids` field, and the docs' own example
   passing `scopes` explicitly in a way that actually breaks policy-derived secret access.
+- 1Claw **Automations** (`server/resolver/src/automation.ts`) and the generic half of the **Intents
+  API** (`server/resolver/src/permit2.ts`), both added 2026-09-29. Automations implements "fire at
+  the deadline" — a `wait_until` + `http`-callback workflow, live-verified end to end (create,
+  trigger, poll, and cancel-while-parked all confirmed against the real API, no doc gaps found).
+  Permit2 signing via 1Claw's Intents API is built against Permit2's real, public schema (confirmed
+  directly from Uniswap's `permit2` repo and SDK, independent of IMD or the `x402` package — see the
+  correction in `docs/DAY-ONE-FINDINGS.md` §10, since last session's claim that the public `x402`
+  package covers this was wrong: it's USDC/EIP-3009-only, zero Permit2 support) and proven correct
+  via a real signature that independently verifies with viem — the live 1Claw signing path itself is
+  blocked on a dashboard-only toggle (`1claw.co/agents`) that no API call can flip, confirmed live.
+- **The ops wallet acquired real `$IMD` and ran `MilestoneEscrow.sol`'s full real lifecycle on Base
+  mainnet with real money** (2026-09-29, at the user's request) — see `docs/DAY-ONE-FINDINGS.md`
+  §11–12 for the full account: a hand-rolled Uniswap v4 swap (0.0015 ETH → 0.517 `$IMD`, since no
+  free swap-quote API remains available; required recovering the pool's real, undocumented `PoolKey`
+  straight from an on-chain event log and cryptographically verifying it), and a real, small,
+  self-dealing demo deploy (one wallet plays every role except the oracle signer) that ran the
+  escrow through deploy → real `true` attestation → `release()` → `withdraw()`, ending in real,
+  confirmed on-chain `Released` state with the full USDC amount back in the wallet. Found three real,
+  reproducible `mainnet.base.org` RPC issues along the way (documented in detail in §12): visible
+  eventual-consistency lag across backend nodes that transiently reverted three different calls
+  despite correct on-chain state, a `getBlock()` timestamp read that came from a node running ~2
+  minutes ahead of the nodes mining later transactions (genuinely tripping the contract's own replay
+  safety check, not a simulation artifact), and the sharp reminder that a non-throwing
+  `waitForTransactionReceipt` does not mean the transaction succeeded — it returns the receipt
+  regardless of `status`, which briefly stranded a throwaway demo escrow (recovered via `reclaim()`,
+  the same safety mechanism a real stuck deal would use; no money lost).
 - CI (`.github/workflows/ci.yml`), green: `forge test` for the contracts, `tsc --noEmit` +
   `node --test` for each server package, lint + a full `next build` for the site. Getting there
   caught three real bugs, none of which a local "fresh clone" dry run had caught, because that dry
@@ -130,20 +166,28 @@ the full six-week shape. What exists right now:
   runner's different timing hit it on the very first real run. All three only surfaced by actually
   watching the real run on GitHub (`gh run watch`) rather than trusting a local approximation of it.
 
-What's deliberately not done yet, because it costs real money or needs information this pass
-couldn't get:
+What's deliberately still not done, because it needs information this pass couldn't get (not money —
+the wallet is funded, including real `$IMD`, see above):
 
-- Any real `workflow.open` or `oracle.request` payment (real IMD tokens, on Ethereum mainnet).
-- 1Claw's Intents API (typed-data signing) and Automations (cron-triggered resolver runs) —
-  intentionally parked; only the vault/secrets side is built (see above).
-- Extraction has not been run against a real LLM (no Gateway API key available this pass) — everything
-  downstream of it is tested by injecting a fixed extraction directly.
-- Deploying `MilestoneEscrow.sol` to any real chain. The ops wallet now holds real ETH on both Base
-  mainnet (~$5) and Ethereum L1 mainnet (0.01 ETH, sent 2026-09-29) — enough gas for a deployment or
-  transactions on either chain, but the wallet still holds **zero `$IMD` tokens** (checked on-chain),
-  so even the L1 ETH doesn't unblock a real IMD purchase — that needs the actual `$IMD` ERC-20, not
-  just ETH for gas. No contract has been deployed with any of it yet — the audit's closing note (no
-  paid human audit performed) still applies before any real-money deployment.
+- Any real `workflow.open` or `oracle.request` payment. The wallet holds enough `$IMD` for one
+  action, but `ImdClient.pay()` still can't complete one — IMD's `quoteApprovalTypedData` schema and
+  the exact Permit2 integration parameters (spender, nonce, witness) are both unconfirmed and
+  intentionally not guessed at (`docs/DAY-ONE-FINDINGS.md` §10). The Permit2 signing *mechanism*
+  itself is built and proven correct (`server/resolver/src/permit2.ts`) — it's just missing IMD's
+  specific parameters to plug in.
+- Extraction has not been run against a real LLM — no Vercel AI Gateway key, and no funded 1Claw
+  Shroud path either (BYOK provider key, LLM Token Billing, or the x402 router-key rail) is
+  configured. Everything downstream of extraction is tested by injecting a fixed extraction
+  directly, and the Shroud routing plumbing itself is tested against a fake `fetch` (real URL, real
+  headers) rather than a live call.
+- 1Claw's Intents API signing has a dashboard-only "enable" toggle (`1claw.co/agents`) that no API
+  call can flip — confirmed live, not guessed (`docs/DAY-ONE-FINDINGS.md` §10). Automations and the
+  vault side have no such gate and are fully live-verified.
+
+A live demo escrow now exists on Base mainnet with real money (see above) — but that was a small,
+deliberate, self-dealing proof, not a production deployment for a real deal between real
+counterparties. The audit's closing note (no paid human audit performed) still applies before this
+contract is used for anything beyond that kind of proof.
 
 ## Local setup
 
