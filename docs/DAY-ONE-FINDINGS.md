@@ -422,23 +422,65 @@ signatures are proven to be genuinely valid, independently-verifiable EIP-712 si
 to the signer's own address via `viem`'s `recoverTypedDataAddress`), tested in
 `server/imd-client/test/paymentSigning.test.ts` and `server/resolver/test/paymentSigner.test.ts`.
 
-**What's still not done, deliberately**: this has never been submitted in a real, paid
-`POST /requests/:id/submit` call — that would actually spend the wallet's real `$IMD`. Everything up
-to that point (quote, challenge, building and signing both real payloads with the real wallet) can be
-exercised for free; only the final submission costs money, so it's held for an explicit go-ahead.
-
 **Caveat, stated plainly**: this is IMD's *current* shipped frontend (chunk `2-2_bbu6gpe2k.js` as of
 2026-09-29), not a published, versioned API contract — it's exactly as stable as any website's
 frontend build, which is to say, not guaranteed. If it ever stops matching IMD's real server-side
 verification, re-fetch and re-diff the bundle rather than assuming this document is still current.
 
+## 14. The reverse-engineered schema works — a real, paid `oracle.request` was admitted on mainnet
+
+At the user's explicit go-ahead, 2026-09-29, immediately after §13. Approved Permit2 for the wallet's
+real `$IMD` (`approve` tx confirmed on-chain), then ran the actual project code end to end —
+`compileDeal()` (free), `ImdClient.quote()` (free), `ImdClient.getChallenge()` (free),
+`imdPaymentSigner()` (free, just signing), then `ImdClient.pay()` — **the real, first-ever paid call**.
+
+**Result: fully admitted, no corrections needed to the reverse-engineered schema.**
+
+- Payment transaction, confirmed on-chain:
+  [`0x4beb83f6b7653d1f49f0bcc61bd371ff9986ce1a38b7542384d0cd6ddd55e1cb`](https://etherscan.io/tx/0x4beb83f6b7653d1f49f0bcc61bd371ff9986ce1a38b7542384d0cd6ddd55e1cb) —
+  `status: 0x1`, a real ERC20 `Transfer` on the `$IMD` contract, and an event from
+  `0x402085c248eea27d92e8b30b2c58ed07f9e20001` (the exact intermediary spender identified in §13 —
+  its own event firing is further confirmation this is genuinely IMD's real routing contract).
+- Wallet's `$IMD` balance: `0.5172145520352781` → `0.017214552035278084` — exactly 0.5 `$IMD`
+  charged, matching the quoted price precisely.
+- `client.pollUntilAdmitted()` returned `status: "admitted"`, `payment.status: "confirmed"`,
+  `payment.paid: true`, and a real `admission.result`: `{kind:"oracle", requestId, jobId, statusUrl,
+  attestationUrl}`.
+
+**Bonus: this also captured the real `GET /oracle/requests/:id` response shape**, never observed
+before (`server/resolver/src/oracleResult.ts`'s `fetchOracleAttestation` was best-effort parsed from
+spec prose alone). While the request is still being worked (`status: "assessing"`), the real shape is:
+
+```json
+{
+  "id", "status", "question", "questionHash", "chainId", "window": {"fromBlock","toBlock","toBlockHash"},
+  "answerType", "evidence", "definitions", "guards", "panelSize", "quorum", "consumer",
+  "validForSeconds", "jobId", "members": [], "agreement": null, "computed": null,
+  "attestation": null, "signature": null, "signer": null, "failure": null, "attempts": 0,
+  "attestedAt": null, "createdAt", "updatedAt", "url", "jobUrl"
+}
+```
+
+`attestation`/`signature`/`signer`/`attestedAt` are null while `status: "assessing"` — presumably
+populated once the panel finishes. **Not yet confirmed**: the exact populated shape once resolved
+(needs checking back on this real request, `b3184afe-f7b7-4038-87f3-8737dc29f16d`, once it settles) —
+that will finally confirm or correct `oracleResult.ts`'s current best-effort parsing.
+
+This is the single point this entire project was blocked on, for the entire session, now closed: the
+whole IMD paid-request flow — compile, quote, challenge, sign, pay, get admitted — is real, working,
+and proven with real money end to end.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
-  parameters~~ — **answered in §13**, reverse-engineered from IMD's own shipped frontend and now
-  implemented for real. Still genuinely unconfirmed: whether IMD's *server-side* verification matches
-  this exactly (never tested against a real paid submission — that costs real money, held for an
-  explicit go-ahead) and whether the frontend logic changes without notice.
+  parameters~~ — **answered in §13, and confirmed against IMD's real server-side verification in
+  §14**: a real paid submission using this exact schema was admitted on the first attempt, no
+  corrections needed. Only remaining caveat: it's IMD's current frontend logic, not a versioned
+  contract, so it could still change without notice in the future.
+- ~~The real `GET /oracle/requests/:id` response envelope~~ — the shape while `status: "assessing"`
+  is now confirmed (§14); the populated shape once a request actually resolves (what `attestation`/
+  `signature`/`signer` look like filled in) is still open — check back on request
+  `b3184afe-f7b7-4038-87f3-8737dc29f16d` once it settles.
 - ~~Whether 1Claw's Intents API can actually produce that signature~~ — answered in §7: yes,
   mechanically (it's a generic EIP-712 signer via `POST /v1/agents/:id/sign`), but only once we have
   the actual domain/types to hand it; 1Claw itself doesn't know IMD's schema. Now that §13 supplies

@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "e2e-demo": "node scripts/e2e-demo.ts",
     "permit2-demo": "node scripts/permit2-demo.ts",
-    "base-mainnet-demo": "node scripts/base-mainnet-demo.ts"
+    "base-mainnet-demo": "node scripts/base-mainnet-demo.ts",
+    "imd-real-payment-demo": "node scripts/imd-real-payment-demo.ts"
   },
   "keywords": [],
   "author": "",

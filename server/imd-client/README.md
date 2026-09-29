@@ -40,14 +40,14 @@ working `PaymentSigner` — no longer a stub — given anything with an `address
 (a viem `LocalAccount`, or once 1Claw's Intents API dashboard toggle is flipped, a 1Claw-backed
 signer).
 
-**What's proven vs. what's still open**: both signatures are confirmed to be genuinely valid,
-independently-verifiable EIP-712 signatures (`test/paymentSigning.test.ts`,
-`server/resolver/test/paymentSigner.test.ts` — signed with a real key, recovered with viem's
-`recoverTypedDataAddress`, not just asserted well-formed). What's **not** proven: a real submission
-to IMD's live paid endpoint, which would actually spend real `$IMD` — held for an explicit
-go-ahead. And this is IMD's *current* shipped frontend, not a versioned contract — it can change
-without notice; re-derive from a fresh bundle fetch if it ever stops matching IMD's real
-verification.
+**Live-verified with real money (2026-09-29)**: `server/resolver/scripts/imd-real-payment-demo.ts`
+ran this for real — a real `oracle.request`, paid for with the wallet's real `$IMD`, **admitted on
+the first attempt, no corrections needed**. Real payment transaction:
+[`0x4beb83f6b7653d1f49f0bcc61bd371ff9986ce1a38b7542384d0cd6ddd55e1cb`](https://etherscan.io/tx/0x4beb83f6b7653d1f49f0bcc61bd371ff9986ce1a38b7542384d0cd6ddd55e1cb).
+Full record, including the real oracle-request response shape this also captured for the first time,
+in `docs/DAY-ONE-FINDINGS.md` §14. This is IMD's *current* shipped frontend, not a versioned
+contract, though — it can change without notice; re-derive from a fresh bundle fetch if it ever stops
+matching IMD's real verification.
 
 ## Local setup
 

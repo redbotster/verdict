@@ -9,23 +9,33 @@ Contract security audit — 3 High + 3 Medium + 5 Low + 1 Info, **all fixed**, p
 static-analysis pass: [audits/2026-09-28/AUDIT-REPORT.md](audits/2026-09-28/AUDIT-REPORT.md).
 Still not a substitute for a paid human audit before any mainnet deployment — see the report's
 closing note.
+**The whole IMD paid-request flow is now real, proven with real money, end to end.** IMD's
+payment-signing schema — the single biggest blocker for this entire project — was never publicly
+documented anywhere, but IMD's own web app has to construct and sign it client-side for a human
+paying with a browser wallet, so it ships in that page's public JS bundle. Reading it gave the real
+schema (`docs/DAY-ONE-FINDINGS.md` §13); `server/resolver/scripts/imd-real-payment-demo.ts` then ran
+it for real — a genuine paid `oracle.request`, admitted on the first attempt, no corrections needed
+(§14). Real transaction:
+[`0x4beb...cdd55e1cb`](https://etherscan.io/tx/0x4beb83f6b7653d1f49f0bcc61bd371ff9986ce1a38b7542384d0cd6ddd55e1cb).
+
 **End-to-end proof** that the pieces actually compose (not just pass their own tests):
 [`server/resolver/scripts/e2e-demo.ts`](server/resolver/README.md#end-to-end-demo-scriptse2e-demots)
 compiles a real question against the live IMD API, deploys the real contract bound to IMD's actual
-`questionHash`, and relays/settles it — real at every step except the one that costs real money
-(local Anvil chain). **Proof that also holds with real money**:
-[`server/resolver/scripts/base-mainnet-demo.ts`](server/resolver/README.md) ran the same contract's
-full lifecycle for real on Base mainnet — deploy, a real signed attestation, `release()`,
-`withdraw()` — ending in confirmed `Released` state with real USDC returned to the wallet.
+`questionHash`, and relays/settles it on a local Anvil chain. **Proof that also holds with real
+money, twice over**:
+[`server/resolver/scripts/base-mainnet-demo.ts`](server/resolver/README.md) ran the escrow
+contract's full lifecycle for real on Base mainnet — deploy, a real signed attestation, `release()`,
+`withdraw()` — ending in confirmed `Released` state with real USDC returned to the wallet; and the
+IMD payment demo above did the same for the oracle side.
 
 ## Layout
 
 - `contracts/` — Foundry project: `MilestoneEscrow.sol` and its test suite.
-- `server/imd-client/` — the server-side IMD paid-request client (the 8-step handshake), free steps
-  implemented and confirmed against the live API. **The Permit2/quote-approval signing step is now
-  real** (`src/paymentSigning.ts`) — the schema was reverse-engineered from IMD's own shipped public
-  frontend (see findings doc §13), not guessed and not from a private repo. Both signatures are
-  proven genuinely valid (independently recover with viem), but never submitted in a real paid call.
+- `server/imd-client/` — the server-side IMD paid-request client (the 8-step handshake). **All 8
+  steps are now real and live-verified**, including payment signing (`src/paymentSigning.ts`) — the
+  schema was reverse-engineered from IMD's own shipped public frontend (findings doc §13), not
+  guessed and not from a private repo, and confirmed correct by a real paid submission that was
+  admitted on the first attempt (§14).
 - `server/oracle-compiler/` — the English-deal-to-oracle-question compiler: extract → match a vetted
   template → lint → free dry-run quote. All three templates now live-verified against `api.imd.fun`.
 - `server/oneclaw-client/` — the server-side client for 1Claw's real Vaults/Agents/Automations/
@@ -36,13 +46,12 @@ full lifecycle for real on Base mainnet — deploy, a real signed attestation, `
 - `server/resolver/` — the agent that acts at a deal's deadline: relays the signed attestation and
   settles the escrow. Chain interaction is real and integration-tested against the actual compiled
   contract on a local Anvil chain, **and proven for real on Base mainnet**
-  (`scripts/base-mainnet-demo.ts`, see findings doc §12). `src/vaultSecrets.ts` and
-  `src/automation.ts` wire in 1Claw's vault and automations side; `src/permit2.ts` implements the
-  generic public Permit2 schema via 1Claw's Intents API; `src/paymentSigner.ts`'s
-  `imdPaymentSigner()` is now IMD's **real, working** payment signer (built on `imd-client`'s
-  reverse-engineered schema — see findings doc §13). Only `fetchOracleAttestation`
-  (`GET /oracle/requests/:id`'s response shape) is still stubbed — it's never been observed, since
-  observing it needs a real paid request.
+  (`scripts/base-mainnet-demo.ts`, findings doc §12). `src/vaultSecrets.ts` and `src/automation.ts`
+  wire in 1Claw's vault and automations side; `src/permit2.ts` implements the generic public Permit2
+  schema via 1Claw's Intents API; `src/paymentSigner.ts`'s `imdPaymentSigner()` is IMD's **real,
+  working, live-verified-with-real-money** payment signer (`scripts/imd-real-payment-demo.ts`,
+  findings doc §13–14). Only the *populated* shape of `GET /oracle/requests/:id` once a request
+  actually resolves is still unconfirmed — its shape while a request is being worked is now known.
 - `site/` — Next.js App Router. The per-deal status page (`/deals/[address]`), read-only,
   server-rendered directly from live contract state via viem; and `/new`, the spec's dual-approval
   flow — compile a real question against the live IMD API, payee connects, payer signs the exact
@@ -169,16 +178,8 @@ the full six-week shape. What exists right now:
   runner's different timing hit it on the very first real run. All three only surfaced by actually
   watching the real run on GitHub (`gh run watch`) rather than trusting a local approximation of it.
 
-What's deliberately still not done — no longer for lack of a schema (see §13: reverse-engineered from
-IMD's own shipped frontend, fully implemented, both signatures proven genuinely valid), but because
-the very last step actually spends real money and needs an explicit go-ahead:
+What's left, none of it blocked on IMD's payment schema anymore (that's done — §13–14):
 
-- **A real, paid `POST /requests/:id/submit` call.** `imdPaymentSigner()` can build and sign both
-  required signatures for real right now, using the wallet's real 0.517 `$IMD`. Everything up to
-  submission — quote, challenge, building and signing both payloads — is free and has been exercised;
-  only the final submit call has not, since it would actually spend the `$IMD` and there's no way to
-  undo a wrong submission. This is the one remaining "real, but not yet attempted" step in the whole
-  project.
 - Extraction has not been run against a real LLM — no Vercel AI Gateway key, and no funded 1Claw
   Shroud path either (BYOK provider key, LLM Token Billing, or the x402 router-key rail) is
   configured. Everything downstream of extraction is tested by injecting a fixed extraction
@@ -187,6 +188,10 @@ the very last step actually spends real money and needs an explicit go-ahead:
 - 1Claw's Intents API signing has a dashboard-only "enable" toggle (`1claw.co/agents`) that no API
   call can flip — confirmed live, not guessed (`docs/DAY-ONE-FINDINGS.md` §10). Automations and the
   vault side have no such gate and are fully live-verified.
+- The real paid oracle request from §14 (`b3184afe-f7b7-4038-87f3-8737dc29f16d`) is still being
+  worked by IMD's panel as of this writing — checking back on it once it resolves will confirm the
+  final populated `GET /oracle/requests/:id` shape (`attestation`/`signature`/`signer`), the one
+  piece of the whole flow still not observed.
 
 A live demo escrow now exists on Base mainnet with real money (see above) — but that was a small,
 deliberate, self-dealing proof, not a production deployment for a real deal between real

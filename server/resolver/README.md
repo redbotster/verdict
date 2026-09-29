@@ -36,16 +36,21 @@ signer once its Intents API dashboard toggle (§10) is flipped for an agent. Bot
 are confirmed genuinely valid — they independently recover to the signer's address via viem's
 `recoverTypedDataAddress` (`test/paymentSigner.test.ts`), not just asserted well-formed.
 
-**Not yet done**: a real submission to IMD's live paid endpoint — that spends real `$IMD` — held for
-an explicit go-ahead. `NOT_IMPLEMENTED_PAYMENT_SIGNER` still exists as the default for callers that
-haven't wired a real signer at all.
+**Live-verified with real money (2026-09-29, `scripts/imd-real-payment-demo.ts`)**: a real
+`oracle.request`, paid for with the wallet's real `$IMD`, admitted on the first attempt — no schema
+corrections needed. Real payment tx:
+[`0x4beb...cdd55e1cb`](https://etherscan.io/tx/0x4beb83f6b7653d1f49f0bcc61bd371ff9986ce1a38b7542384d0cd6ddd55e1cb).
+Full record in `docs/DAY-ONE-FINDINGS.md` §14. `NOT_IMPLEMENTED_PAYMENT_SIGNER` still exists as the
+default for callers that haven't wired a real signer.
 
 ## What else is stubbed, and why
 
-- **`fetchOracleAttestation`** (`src/oracleResult.ts`) — the actual `GET /oracle/requests/:id`
-  response shape has never been observed, since observing it requires a real paid `oracle.request`.
-  Best-effort parsed from spec prose alone; treat a failure here as informative, not proof the rest
-  of the resolver is broken.
+- **`fetchOracleAttestation`** (`src/oracleResult.ts`) — the real `GET /oracle/requests/:id`
+  response shape is now confirmed while a request is still being worked (`status: "assessing"` —
+  see `docs/DAY-ONE-FINDINGS.md` §14, captured from the real paid request above), but the *populated*
+  shape once a request actually resolves (`attestation`/`signature`/`signer` filled in) is still
+  unconfirmed — this file is still best-effort parsed from spec prose for that part. Treat a failure
+  here as informative, not proof the rest of the resolver is broken.
 - **`ApprovalGate`** (`src/approval.ts`) — 1Claw's Human-Readable Action Approvals aren't wired up.
   The threshold *logic* (`needsApproval`) is real and tested; only the "ask a human" transport is a
   stub.
