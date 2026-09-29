@@ -353,7 +353,11 @@ export class OneClawClient {
     const res = await fetch(`${BASE_URL}/v1/agents/${encodeURIComponent(agentId)}/sign`, {
       method: "POST",
       headers: await this.headers(),
-      body: JSON.stringify(request),
+      // EIP712TypedData messages routinely carry BigInt for uint256 fields (viem's own convention
+      // for signTypedData, e.g. @verdict/imd-client's permit2PaymentTypedData) — plain JSON.stringify
+      // throws on those, so every uint256 gets its decimal string instead, same as this API's own
+      // request/response bodies already represent large numbers.
+      body: JSON.stringify(request, (_key, value) => (typeof value === "bigint" ? value.toString() : value)),
     });
     return parseJsonOrThrow<SignResult>(res);
   }

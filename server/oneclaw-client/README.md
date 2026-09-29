@@ -49,14 +49,16 @@ Added 2026-09-29, both live-verified against the real API:
   all confirmed working exactly as documented, no doc gaps found. See
   `@verdict/resolver`'s `automation.ts` for the resolver-specific
   `scheduleResolutionAutomation()` built on top.
-- **Intents API** (`createSigningKey`, `sign`, `updateAgent`, etc.) — the signing mechanism
-  itself is generic: `POST /v1/agents/:id/sign` takes an arbitrary `{domain, types,
-  primaryType, message}` document and doesn't know IMD's `quoteApprovalTypedData` schema, so
-  using it for IMD's actual payment still means getting that schema from IMD first (parked,
-  see `docs/DAY-ONE-FINDINGS.md` §7). What IS built and live-tested: `@verdict/resolver`'s
-  `permit2.ts` uses this client to sign a real, publicly-confirmed Permit2 `PermitTransferFrom`
-  — see its own README section for a live-API gate found in the process (`intents_api_enabled`
-  is PATCHable but doesn't actually enable signing; that specific toggle is dashboard-only).
+- **Intents API** (`createSigningKey`, `sign`, `updateAgent`, `withDomainType`, etc.) — the signing
+  mechanism itself is generic: `POST /v1/agents/:id/sign` takes an arbitrary `{domain, types,
+  primaryType, message}` document. **Live-verified for real 2026-09-29** (`docs/DAY-ONE-FINDINGS.md`
+  §20, correcting §10's "dashboard-only" belief — it isn't; the real fix is a fresh agent-token
+  exchange after enabling, not a dashboard visit): both `oneClawTypedDataSigner`
+  (`typedDataSigner.ts`) and `@verdict/resolver`'s `permit2.ts` produce real signatures through
+  1Claw's real endpoint, independently verified with viem's `recoverTypedDataAddress` — not just
+  "no error thrown." `withDomainType()` handles a real wire-format gap: 1Claw's hasher requires
+  `types.EIP712Domain` explicitly, which viem-built typed data (this whole repo's convention) never
+  includes.
 
 ## Auth
 

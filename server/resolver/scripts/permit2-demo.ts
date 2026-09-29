@@ -1,12 +1,19 @@
 // Proves the generic half of IMD's "Permit2" payment scheme is correctly constructed (public,
-// confirmed schema — see permit2.ts) and produces a genuinely valid signature. Tries the real path
-// first — sign through 1Claw's Intents API with a provisioned key — and falls back to a local viem
-// account if 1Claw's dashboard-only "Intents API enabled" gate hasn't been flipped for this org
-// (confirmed live 2026-09-29: PATCH /v1/agents/:id accepts and echoes back intents_api_enabled:
-// true, but the sign endpoint still 403s with "A human operator must enable it in the agent
-// settings at https://1claw.co/agents" — that specific gate is dashboard-only, not API-settable,
-// despite the field being PATCHable. See docs/DAY-ONE-FINDINGS.md). Either way, the resulting
-// signature is independently verified with viem — not just trusting the signer's own response.
+// confirmed schema — see permit2.ts) and produces a genuinely valid signature, signed for real
+// through 1Claw's Intents API. Live-verified 2026-09-29 — see docs/DAY-ONE-FINDINGS.md §20 for the
+// three real gotchas found getting here (correcting §10's "dashboard-only gate" belief, which was
+// wrong on two counts):
+//   1. intents_api_enabled is a claim baked into a token at MINT time, not checked live against the
+//      agent's DB record — signing must be authenticated as the AGENT itself (a fresh
+//      POST /v1/auth/agent-token exchange, right after enabling), not the org-wide human key, even
+//      though the human key has full "*" scope everywhere else in this codebase. This script
+//      re-authenticates as the agent specifically because of that.
+//   2. eip712_domain_allowlist entries are `{ verifying_contract: "0x..." }` objects, not plain
+//      address strings — the wrong shape is silently accepted and stored but never matches anything.
+//   3. 1Claw's hasher requires `types.EIP712Domain` present explicitly; signPermit2Transfer()
+//      handles this via withDomainType() (see typedDataSigner.ts) — nothing to do here.
+// The fallback path below is kept for a genuinely disabled/misconfigured org, but is no longer the
+// expected outcome.
 //
 //   ONE_CLAW_API_KEY=$(grep -oP '(?<=^ONE_CLAW_API_KEY=).*' ~/.secrets/verdict.env) npm run permit2-demo
 
@@ -38,7 +45,7 @@ async function main() {
 
   try {
     console.log("1. Registering an agent with Intents API + Permit2 allowlisted...");
-    const { agent } = await client.createAgent(`verdict-permit2-demo-${stamp}`, {
+    const { agent, api_key: agentApiKey } = await client.createAgent(`verdict-permit2-demo-${stamp}`, {
       description: "Proves Permit2 signing via 1Claw's Intents API (oneclaw-client permit2 demo)",
     });
     agentId = agent.id;
@@ -55,8 +62,15 @@ async function main() {
     const key = await client.createSigningKey(agent.id, "ethereum");
     console.log(`   address = ${key.address}`);
 
+    console.log("3b. Re-authenticating as the agent itself (a fresh token, minted after step 2)...");
+    // The human-authenticated `client` above cannot sign for this agent — intents_api_enabled is
+    // baked into a token at mint time, checked against the CALLER's own token, not looked up live
+    // against the agent's DB record. See the file header and docs/DAY-ONE-FINDINGS.md §20.
+    if (!agentApiKey) throw new Error("createAgent() didn't return api_key — can't re-authenticate as the agent");
+    const agentClient = new OneClawClient({ agentId: agent.id, agentApiKey });
+
     console.log("4. Signing a real Permit2 PermitTransferFrom through 1Claw's Intents API...");
-    const { signature, typedData } = await signPermit2Transfer(client, agent.id, "ethereum", 1, TEST_PERMIT);
+    const { signature, typedData } = await signPermit2Transfer(agentClient, agent.id, "ethereum", 1, TEST_PERMIT);
     console.log(`   signature = ${signature}`);
 
     console.log("5. Independently verifying the signature recovers to the provisioned address (viem)...");

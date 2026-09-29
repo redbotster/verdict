@@ -45,6 +45,12 @@ A real 1Claw Automation has been proven to reach its webhook live (§18). And th
 possible source URL to cite instead of two, reached real quorum and produced the first genuinely
 successful attestation this project has seen. See §18–19.
 
+1Claw's Intents API signing also works for real now (§20) — a real signature through 1Claw's actual
+endpoint, independently verified to recover to the right address. Two things this project believed
+and documented turned out to be wrong: that the toggle was dashboard-only (it's the same field as
+always; the real fix is re-authenticating as the agent after flipping it), and that it needed a paid
+tier upgrade (there's no tier gate at all — that was a bug in 1Claw's own docs, since fixed).
+
 ## Layout
 
 | Package | What it does | Status |
@@ -60,13 +66,15 @@ Each package has its own README with the real depth. This one's just for "does i
 
 ## What's not done
 
-- 1Claw's Intents API needs a dashboard toggle flipped per agent before it'll actually sign — no API
-  call can do that part. `server/oneclaw-client`'s typed-data signer (a drop-in replacement for the
-  raw private key below) is written and tested against a fake client, but can't be live-verified
-  until that toggle is flipped.
-- The resolver still runs on a raw `EVM_PRIVATE_KEY` in an env var, not a vault-held key. The
-  deployed webhook deliberately has none configured yet — it stops cleanly at that point rather than
-  relay anything.
+- 1Claw's Intents API typed-data signing is now live-verified (§20 — an earlier belief that it needed
+  a dashboard-only gate, and separately that it needed a paid tier upgrade, were both wrong; the real
+  fix was a fresh agent token). What's still missing: real *transaction submission* through 1Claw
+  (`submitAttestation`/`release` are on-chain writes, not typed-data signatures) — a separate,
+  not-yet-built Intents API integration.
+- The resolver still runs on a raw `EVM_PRIVATE_KEY` in an env var for those on-chain writes, not a
+  vault-held key — the item above is what's blocking that from actually being replaced. The deployed
+  webhook deliberately has none configured yet — it stops cleanly at that point rather than relay
+  anything.
 - A second real request finally got a successful attestation (§19), but the exact signature/signer
   values weren't captured in that run's log (an output-capture issue, not a shape/parsing failure —
   see §19). The disagreement risk from §15 is real and worth knowing either way; §19 shows one way to
@@ -123,3 +131,4 @@ order it was found:
 | 17 | Real LLM extraction via 1Claw Shroud — a Vertex structured-outputs block, a wrong-date bug, and IMD's undocumented 30-day window cap |
 | 18 | Deployed `site/` to Vercel for real — a monorepo build, an artifact-tracing bug, a live automation-to-webhook proof, and a public-RPC reliability finding |
 | 19 | Topped up `$IMD` with a second real swap, and got the first-ever successful (non-disagreed) real attestation |
+| 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |

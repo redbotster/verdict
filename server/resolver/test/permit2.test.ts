@@ -84,6 +84,15 @@ test("signPermit2Transfer: calls the signer with the exact typed data and return
   assert.deepEqual(typedData, permit2TypedData(PERMIT, 1));
   assert.deepEqual(captured, {
     agentId: "agent-1",
-    request: { intent_type: "typed_data", chain: "ethereum", typed_data: permit2TypedData(PERMIT, 1) },
+    request: {
+      intent_type: "typed_data",
+      chain: "ethereum",
+      // EIP712Domain is injected before the request goes out — see withDomainType() /
+      // docs/DAY-ONE-FINDINGS.md §20.
+      typed_data: {
+        ...permit2TypedData(PERMIT, 1),
+        types: { ...permit2TypedData(PERMIT, 1).types, EIP712Domain: [{ name: "name", type: "string" }, { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }] },
+      },
+    },
   });
 });

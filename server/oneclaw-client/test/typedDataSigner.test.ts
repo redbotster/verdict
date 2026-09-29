@@ -32,8 +32,65 @@ test("oneClawTypedDataSigner: signTypedData calls client.sign with the right age
   assert.equal(signature, "0xabc123");
   assert.deepEqual(captured, {
     agentId: "agent-1",
-    request: { intent_type: "typed_data", chain: "ethereum", typed_data: TYPED_DATA },
+    request: {
+      intent_type: "typed_data",
+      chain: "ethereum",
+      // EIP712Domain is injected — see the withDomainType tests below for why.
+      typed_data: { ...TYPED_DATA, types: { ...TYPED_DATA.types, EIP712Domain: [{ name: "name", type: "string" }, { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }] } },
+    },
   });
+});
+
+test("oneClawTypedDataSigner: injects EIP712Domain into types, matching the domain's actual fields", async () => {
+  // 1Claw's server-side EIP-712 hasher requires this explicitly (confirmed live 2026-09-29: 400s
+  // "Type 'EIP712Domain' not found in types" without it) — viem's own signTypedData derives it
+  // automatically and rejects/ignores it in `types`, so every EIP712TypedData object built for local
+  // viem signing throughout this repo omits it. See docs/DAY-ONE-FINDINGS.md §20.
+  let capturedTypedData: EIP712TypedData | undefined;
+  const fakeClient = {
+    sign: async (_agentId: string, request: any) => {
+      capturedTypedData = request.typed_data;
+      return { signature: "0xabc", from: "0x0" } satisfies SignResult;
+    },
+  } as unknown as OneClawClient;
+
+  const signer = oneClawTypedDataSigner({ client: fakeClient, agentId: "agent-1", address: "0xF57CfAF1f2b12E7f23C342c4fAfd675379840668", chain: "ethereum" });
+  // A domain with all five standard fields, to confirm every one gets mapped to its right type.
+  await signer.signTypedData({
+    domain: { name: "Test", version: "1", chainId: 1, verifyingContract: "0xabc", salt: "0xdead" },
+    types: { Foo: [{ name: "bar", type: "uint256" }] },
+    primaryType: "Foo",
+    message: { bar: 1n },
+  });
+
+  assert.deepEqual(capturedTypedData?.types.EIP712Domain, [
+    { name: "name", type: "string" },
+    { name: "version", type: "string" },
+    { name: "chainId", type: "uint256" },
+    { name: "verifyingContract", type: "address" },
+    { name: "salt", type: "bytes32" },
+  ]);
+});
+
+test("oneClawTypedDataSigner: doesn't overwrite an EIP712Domain type the caller already supplied", async () => {
+  let capturedTypedData: EIP712TypedData | undefined;
+  const fakeClient = {
+    sign: async (_agentId: string, request: any) => {
+      capturedTypedData = request.typed_data;
+      return { signature: "0xabc", from: "0x0" } satisfies SignResult;
+    },
+  } as unknown as OneClawClient;
+
+  const signer = oneClawTypedDataSigner({ client: fakeClient, agentId: "agent-1", address: "0xF57CfAF1f2b12E7f23C342c4fAfd675379840668", chain: "ethereum" });
+  const customDomainType = [{ name: "name", type: "string" }];
+  await signer.signTypedData({
+    domain: { name: "Test", chainId: 1 },
+    types: { Foo: [{ name: "bar", type: "uint256" }], EIP712Domain: customDomainType },
+    primaryType: "Foo",
+    message: { bar: 1n },
+  });
+
+  assert.deepEqual(capturedTypedData?.types.EIP712Domain, customDomainType);
 });
 
 test("oneClawChainName: maps known EVM chain ids to 1Claw's real chain-name strings", () => {

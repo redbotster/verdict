@@ -1,4 +1,5 @@
 import { recoverTypedDataAddress } from "viem";
+import { withDomainType } from "../../oneclaw-client/src/typedDataSigner.ts";
 import type { EIP712TypedData, SignResult } from "../../oneclaw-client/src/types.ts";
 
 // Permit2's real, public EIP-712 schema for a single-use "signature transfer" authorization
@@ -76,7 +77,9 @@ export async function signPermit2Transfer(
   permit: Permit2TransferPermit,
 ): Promise<{ signature: `0x${string}`; typedData: EIP712TypedData }> {
   const typedData = permit2TypedData(permit, chainId);
-  const result = await client.sign(agentId, { intent_type: "typed_data", chain, typed_data: typedData });
+  // 1Claw's server-side EIP-712 hasher requires types.EIP712Domain explicitly present — viem-built
+  // typed data (like this one) omits it. See docs/DAY-ONE-FINDINGS.md §20.
+  const result = await client.sign(agentId, { intent_type: "typed_data", chain, typed_data: withDomainType(typedData) });
   return { signature: result.signature, typedData };
 }
 

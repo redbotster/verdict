@@ -1,7 +1,7 @@
 export { OneClawClient, waitUntilStep, httpStep } from "./client.ts";
 export type { OneClawClientOptions } from "./client.ts";
 export { OneClawApiError } from "./types.ts";
-export { oneClawTypedDataSigner, oneClawChainName } from "./typedDataSigner.ts";
+export { oneClawTypedDataSigner, oneClawChainName, withDomainType } from "./typedDataSigner.ts";
 export type { TypedDataSigner, OneClawTypedDataSignerOptions } from "./typedDataSigner.ts";
 export type {
   AccessToken,

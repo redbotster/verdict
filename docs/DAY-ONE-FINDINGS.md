@@ -716,6 +716,74 @@ is confirming the exact **signature verifies** on-chain against `MilestoneEscrow
 signer, which needs a fresh real request to observe end-to-end with logging fixed, not a re-fetch of
 this one.
 
+## 20. 1Claw's Intents API actually works — §10's "dashboard-only gate" belief was wrong, and four real bugs stood in the way
+
+The user flipped `intents_api_enabled` for an agent and reported it "on"; testing still 403'd with
+the exact same "Intents API is not enabled for this agent" message §10 documented months earlier.
+Before spending more time working around it, asked 1Claw directly — and the answer corrected two
+things this project had believed and documented as fact:
+
+**There is no tier gate.** Reading 1Claw's own `docs.1claw.co/docs/guides/billing-and-usage` (quoted
+earlier in this log) said the Intents API required Business tier ($999/mo) — that belief was
+reported to the user but never actually acted on (no upgrade happened) before checking with 1Claw
+directly. 1Claw confirmed there's no plan check on Intents anywhere in their code, and that their own
+docs said otherwise in three inconsistent places (tier bullets, a comparison table, and a callout)
+before this was reported — fixed on their end as of this writing. **Do not upgrade a 1Claw plan on
+the assumption that Intents API needs it** — that assumption, made in good faith from their own docs,
+was simply wrong.
+
+**The real cause: a stale JWT claim, not a dashboard-only setting.** `intents_api_enabled` (and
+`eip712_domain_allowlist`, `shroud_config` — §17's operational note was the same shape, earlier)
+gets baked into a token at *mint* time. Flipping the toggle updates the agent's database row but
+does nothing to a token already issued — so a client using the human org-wide API key (with `*`
+scope) keeps getting refused, because **the check is against the calling token's own claim, not a
+live lookup of the target agent's current DB state**. Confirmed by decoding a token: a token minted
+before the toggle omits/falses the claim; one minted after (via a fresh
+`POST /v1/auth/agent-token` exchange, **specifically as the agent**, not the human key) carries
+`"intents_api_enabled":true`. §10's write-up should be read as: "the toggle is real, PATCHable, and
+works — but you must re-authenticate *as that agent* afterward, not just re-check with the human
+key." `server/oneclaw-client/scripts/permit2-demo.ts` and `typedDataSigner.ts`'s header comment are
+both updated to reflect this correction.
+
+**Three more real, live bugs found getting from "no longer refused" to an actual valid signature:**
+
+1. **`eip712_domain_allowlist`'s entries are objects, not strings.** Docs
+   (`docs.1claw.co/docs/agents/intents/signing`): `JSON[]`, e.g.
+   `[{"verifying_contract": "0xA0b..."}]`. Patching it as `["0x..."]` (plain address strings) is
+   silently accepted and stored by `PATCH /v1/agents/:id` — no validation error — but never matches
+   anything, so signing keeps 403ing with the *different* message "Verifying contract ... is not in
+   the agent's eip712_domain_allowlist," which looks like the allowlist didn't take effect at all.
+   Also per the docs: "Known dangerous types (Permit, Permit2) always require explicit allowlisting"
+   — `eip712_default_policy: "allow"` alone isn't enough for these two specifically.
+2. **1Claw's server-side EIP-712 hasher requires `types.EIP712Domain` present explicitly** —
+   `400 "Type 'EIP712Domain' not found in types"`. viem's own `signTypedData` derives this from the
+   `domain` object and doesn't want it in `types` at all, so every `EIP712TypedData` object built for
+   local viem signing throughout this repo (all of `@verdict/imd-client`'s `paymentSigning.ts`,
+   `server/resolver/src/permit2.ts`) omits it — correctly, for viem, but not for 1Claw's endpoint.
+   Fixed once, centrally: `oneclaw-client`'s new `withDomainType()` (exported from
+   `typedDataSigner.ts`) inspects which of the five standard domain fields are actually present and
+   builds the matching type array, applied inside `oneClawTypedDataSigner` and in
+   `permit2.ts`'s `signPermit2Transfer()`.
+3. **`OneClawClient.sign()` couldn't serialize its own request body.** `EIP712TypedData` messages
+   routinely carry `BigInt` for `uint256` fields (viem's convention) — plain
+   `JSON.stringify(request)` throws `"Do not know how to serialize a BigInt"` the moment a real
+   payload reaches it. This had never been hit before because nothing had exercised `sign()` with a
+   real, viem-shaped typed-data object until this pass. Fixed with a stringify replacer converting
+   `bigint` to its decimal string — the same convention 1Claw's own request/response bodies already
+   use for large numbers.
+
+**Result: real, independently-verified success**, twice — once against the `verdict-extraction`
+agent with a real IMD-shaped Permit2 payment payload (recovered address matched exactly via viem's
+`recoverTypedDataAddress`), and again via the rewritten `permit2-demo.ts` against a fresh throwaway
+agent, proving this isn't a fluke tied to one agent's config. `oneClawTypedDataSigner` is no longer
+"code-complete but unverified" — it is live-verified, closing the gap `docs/DAY-ONE-FINDINGS.md` has
+flagged since §7.
+
+**Still not done**: this only covers *typed-data signing* (the IMD payment step). The resolver's
+on-chain relay calls (`submitAttestation`, `release`) need real transaction submission
+(`POST /v1/agents/:id/transactions`), a different, not-yet-built Intents API integration — the raw
+`EVM_PRIVATE_KEY` gap in `site/app/api/resolve/[address]/route.ts` is half closed, not fully.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

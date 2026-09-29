@@ -31,10 +31,11 @@ immutably at deployment. Anyone else can relay the same public attestation if th
 `PermitWitnessTransferFrom` payment, then a `QuoteApproval` binding it to the exact quote — following
 the schema reverse-engineered from IMD's own shipped frontend (`docs/DAY-ONE-FINDINGS.md` §13; the
 actual construction lives in `@verdict/imd-client`'s `paymentSigning.ts`). `account` just needs
-`address` and `signTypedData` — a viem `LocalAccount` works directly, and so would a 1Claw-backed
-signer once its Intents API dashboard toggle (§10) is flipped for an agent. Both produced signatures
-are confirmed genuinely valid — they independently recover to the signer's address via viem's
-`recoverTypedDataAddress` (`test/paymentSigner.test.ts`), not just asserted well-formed.
+`address` and `signTypedData` — a viem `LocalAccount` works directly, and so does a 1Claw-backed
+signer (`oneClawTypedDataSigner`, now live-verified — see §20) once its agent has a fresh token
+minted after Intents is enabled. Both produced signatures are confirmed genuinely valid — they
+independently recover to the signer's address via viem's `recoverTypedDataAddress`
+(`test/paymentSigner.test.ts`), not just asserted well-formed.
 
 **Live-verified with real money (2026-09-29, `scripts/imd-real-payment-demo.ts`)**: a real
 `oracle.request`, paid for with the wallet's real `$IMD`, admitted on the first attempt — no schema
@@ -115,16 +116,20 @@ have zero Permit2 support despite last being described that way; see
 generic Intents API; `verifyPermit2Signature()` independently checks the result with viem rather than
 trusting the signer's own response.
 
-**What's proven vs. what's still open**: `scripts/permit2-demo.ts` proves the schema and code are
-correct — a real signature, independently verified. The *live* 1Claw signing path hit a real gate:
-`PATCH /v1/agents/:id` accepts and echoes back `intents_api_enabled: true`, but the sign endpoint
-still 403s with "a human operator must enable it... at https://1claw.co/agents" — that specific gate
-is dashboard-only, not API-settable, confirmed by retrying after real elapsed time (not a propagation
-race). The script falls back to a local viem account to still prove the schema/signature is correct.
-Flip that dashboard toggle for an agent and re-run to get the live 1Claw proof too. Either way, this
-is still **not** IMD's actual integration — the real `spender`, nonce source, and whether a witness
-(`PermitWitnessTransferFrom`) is required are unconfirmed and not guessed at (see
-`paymentSigner.ts` and `docs/DAY-ONE-FINDINGS.md`).
+**Live-verified for real, 2026-09-29** (`docs/DAY-ONE-FINDINGS.md` §20 — correcting the "dashboard-only
+gate" belief from §10, which turned out to be wrong): `scripts/permit2-demo.ts` signs a real Permit2
+`PermitTransferFrom` through 1Claw's actual Intents API and independently verifies it recovers to the
+provisioned signing key's address with viem. Getting from "403 refused" to a real signature took
+three real fixes, all in `docs/DAY-ONE-FINDINGS.md` §20: re-authenticating as the agent itself (not
+the human org-wide key) after enabling, the correct `eip712_domain_allowlist` shape
+(`[{verifying_contract}]`, not plain address strings), and `withDomainType()` for a wire-format gap
+in 1Claw's hasher. The fallback-to-local-viem-account path still exists in the script for a genuinely
+misconfigured org, but is no longer the expected outcome.
+
+This is still **not** IMD's actual payment integration, though — the real `spender`, nonce source,
+and whether a witness (`PermitWitnessTransferFrom`) is required are IMD-specific and already answered
+separately in §13/§14; `imdPaymentSigner` (not `permit2.ts`) is what a real payment actually uses, and
+it's now equally able to take a 1Claw-backed signer as its `account` — see `paymentSigner.ts`.
 
 ## What's real and tested
 
