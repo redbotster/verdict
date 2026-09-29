@@ -20,7 +20,9 @@ closing note.
   settles the escrow. Chain interaction is real and integration-tested against the actual compiled
   contract on a local Anvil chain; the IMD payment-signing and oracle-result-fetching steps are
   stubbed pending the same unconfirmed schemas noted above.
-- `site/` — not yet built: per-deal status page.
+- `site/` — the per-deal status page: Next.js App Router, read-only, server-rendered directly from
+  live contract state via viem. Verified in a real browser against a real local deployment, not just
+  built and assumed to work.
 
 ## Status
 
@@ -58,6 +60,11 @@ the full six-week shape. What exists right now:
   human-approval gating is implemented and tested; the actual IMD payment-signing and
   oracle-attestation-fetch steps are stubbed (same "don't guess at an unconfirmed schema" pattern as
   `imd-client`'s `pay()`).
+- `site/`: the `/deals/[address]` status page, reading deal terms, live status, and owed balances
+  straight from the contract (ABI from the Foundry artifact, same no-drift pattern as the resolver).
+  `npm run deploy-demo` deploys a real escrow to local Anvil and settles it, so the page was actually
+  checked against genuine on-chain state in a real browser (screenshots, zero console errors, correct
+  numbers on both the list page and a settled deal page).
 
 What's deliberately not done yet, because it costs real money or needs information this pass
 couldn't get:
