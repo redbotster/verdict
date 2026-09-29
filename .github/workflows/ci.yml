@@ -87,6 +87,13 @@ jobs:
         with:
           name: contracts-out
           path: contracts/out
+      # app/new/actions.ts imports @verdict/oracle-compiler (a local `file:` dependency, symlinked)
+      # as a real module, not just a relative source read — its index.ts pulls in extract.ts, which
+      # needs `ai`/`zod` from oracle-compiler's own node_modules. Same class of gap as the resolver
+      # job above; confirmed by testing this job's steps against a genuinely fresh, isolated clone
+      # before pushing, not just by trusting the working copy.
+      - run: npm install
+        working-directory: server/oracle-compiler
       - run: npm install
         working-directory: site
       - run: npm run lint

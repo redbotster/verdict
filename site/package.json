@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@verdict/imd-client": "file:../server/imd-client",
+    "@verdict/oracle-compiler": "file:../server/oracle-compiler",
     "next": "16.3.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",

@@ -26,9 +26,11 @@ compiles a real question against the live IMD API, deploys the real contract bou
   settles the escrow. Chain interaction is real and integration-tested against the actual compiled
   contract on a local Anvil chain; the IMD payment-signing and oracle-result-fetching steps are
   stubbed pending the same unconfirmed schemas noted above.
-- `site/` — the per-deal status page: Next.js App Router, read-only, server-rendered directly from
-  live contract state via viem. Verified in a real browser against a real local deployment, not just
-  built and assumed to work.
+- `site/` — Next.js App Router. The per-deal status page (`/deals/[address]`), read-only,
+  server-rendered directly from live contract state via viem; and `/new`, the spec's dual-approval
+  flow — compile a real question against the live IMD API, payee connects, payer signs the exact
+  on-chain authorization, payee acknowledges, get a ready-to-deploy payload. Both verified in a real
+  browser, not just built and assumed to work.
 
 ## Status
 
@@ -71,6 +73,19 @@ the full six-week shape. What exists right now:
   `npm run deploy-demo` deploys a real escrow to local Anvil and settles it, so the page was actually
   checked against genuine on-chain state in a real browser (screenshots, zero console errors, correct
   numbers on both the list page and a settled deal page).
+- `site/app/new/`: the dual-approval flow — a real Server Action compiles a question against the live
+  IMD API, using structured form input instead of LLM extraction (no key available), so it calls
+  `oracle-compiler`'s template builder directly rather than going through `compileDeal()`'s extraction
+  step. Then a browser wallet (raw EIP-1193 via viem, no wallet-connect library) signs the exact
+  `EscrowTerms` authorization the contract's constructor checks. Verified end-to-end in a real browser, including a simulated wallet since no
+  extension is available headlessly. Getting `site/` to import its sibling packages as real
+  dependencies (not just read `contracts/out/`'s JSON, which it already did) surfaced a genuine
+  Turbopack constraint worth knowing about elsewhere in a monorepo: it refuses to resolve a relative
+  import that reaches outside the Next project directory, even through a symlink, and
+  `serverExternalPackages` alone doesn't fix that — needed `next.config.ts`'s `turbopack.root` pointed
+  at the actual monorepo root, `allowImportingTsExtensions` in `tsconfig.json`, and switching both
+  sibling packages from deep subpath imports to real barrel exports (`src/index.ts` via each
+  package's `main`). See `site/README.md` for the full account.
 - The full pipeline, tied together for real: `server/resolver/scripts/e2e-demo.ts` compiles a deal
   through the live IMD API, deploys the real contract bound to the real resulting `questionHash`, and
   runs it through `resolveDeal()`'s real relay/settle logic — proving compile → deploy → resolve
@@ -99,8 +114,6 @@ couldn't get:
 - 1Claw vault/policy/automation wiring (needs the Permit2 signing schema resolved first).
 - Extraction has not been run against a real LLM (no Gateway API key available this pass) — everything
   downstream of it is tested by injecting a fixed extraction directly.
-- The dual-approval UI (both parties reviewing and signing off on the pinned question before
-  funding) — `site/` covers the read-only status view, not this.
 - Funding the ops wallet.
 
 ## Local setup
