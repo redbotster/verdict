@@ -1,13 +1,14 @@
 # contracts
 
-`MilestoneEscrow.sol`: the on-chain escrow. Payer funds it at construction (a payer-signed
-authorization binds the exact terms, not a predicted deploy address); an oracle-signed attestation
-(`submitAttestation`) resolves it true or false; `release()`/`reclaim()` settle via pull-payment
-(`withdraw()`), sweeping the live token balance rather than a stored nominal amount. 56/56 tests
-passing (unit + fuzz), audited — see
-[`audits/2026-09-28/AUDIT-REPORT.md`](../audits/2026-09-28/AUDIT-REPORT.md) for the full findings and
-fixes (3 High + 3 Medium + 5 Low + 1 Info, all fixed, plus a Slither pass). Live on Base mainnet as a
-small self-dealing demo — see the root README's "Proven, with real money" section.
+`MilestoneEscrow.sol` is the on-chain escrow. The payer funds it at construction, and a payer-signed
+authorization binds the exact terms so a deployer can't swap in different numbers later. An
+oracle-signed attestation resolves it true or false, and `release()`/`reclaim()` pay out through
+`withdraw()` — pull payments, sweeping whatever the contract actually holds rather than trusting a
+stored amount.
+
+56/56 tests passing, audited (3 High + 3 Medium + 5 Low + 1 Info, all fixed) — see
+[`audits/2026-09-28/AUDIT-REPORT.md`](../audits/2026-09-28/AUDIT-REPORT.md). Already deployed and
+settled for real on Base mainnet, see the root README.
 
 ```
 forge test
