@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: forge build
+        run: forge build
+        working-directory: contracts
+      - name: forge test
+        run: forge test -vv
+        working-directory: contracts
+      - name: Upload build artifacts (ABI + bytecode for downstream jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: contracts-out
+          path: contracts/out
+          retention-days: 1
+
+  imd-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install
+        working-directory: server/imd-client
+      - run: npm run typecheck
+        working-directory: server/imd-client
+
+  oracle-compiler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install
+        working-directory: server/oracle-compiler
+      - run: npm run typecheck
+        working-directory: server/oracle-compiler
+      - name: npm test (unit only — no LLM key in CI, extraction is exercised via injected fakes)
+        run: npm test
+        working-directory: server/oracle-compiler
+
+  resolver:
+    needs: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          name: contracts-out
+          path: contracts/out
+      - run: npm install
+        working-directory: server/resolver
+      - run: npm run typecheck
+        working-directory: server/resolver
+      - name: npm test (includes a real local Anvil integration test)
+        run: npm test
+        working-directory: server/resolver
+
+  site:
+    needs: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          name: contracts-out
+          path: contracts/out
+      - run: npm install
+        working-directory: site
+      - run: npm run lint
+        working-directory: site
+      # No standalone `npm run typecheck` here: Next generates ambient types (LayoutProps, etc.)
+      # into .next/types/ during build/dev, so a bare `tsc --noEmit` on a fresh checkout fails
+      # before that exists. `next build` runs its own TypeScript check internally (confirmed:
+      # its output includes a "Running TypeScript" step) — that's this job's type-check.
+      - run: npm run build
+        working-directory: site

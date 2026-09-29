@@ -47,7 +47,11 @@ this page shows a deal's status *after* the terms are already settled, not the a
 
 ```
 npm install
-npm run typecheck
 npm run lint
-npm run build   # production build check
+npm run build   # runs its own TypeScript check internally — see note below
 ```
+
+Run `npm run build` (or `npm run dev`) at least once before `npm run typecheck` on a fresh checkout:
+Next generates ambient types (`LayoutProps`, etc.) into `.next/types/` during build/dev, so a bare
+`tsc --noEmit` fails on a checkout that's never been built. This is also why CI's `site` job doesn't
+run a standalone typecheck step — `next build`'s internal check covers it.

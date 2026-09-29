@@ -1,5 +1,7 @@
 # Verdict
 
+[![CI](https://github.com/redbotster/verdict/actions/workflows/ci.yml/badge.svg)](https://github.com/redbotster/verdict/actions/workflows/ci.yml)
+
 Oracle-settled milestone escrow on IMD + 1Claw. Full product spec: [docs/SPEC.md](docs/SPEC.md).
 Live-API day-one findings (read this before writing more integration code):
 [docs/DAY-ONE-FINDINGS.md](docs/DAY-ONE-FINDINGS.md).
@@ -73,6 +75,12 @@ the full six-week shape. What exists right now:
   through the live IMD API, deploys the real contract bound to the real resulting `questionHash`, and
   runs it through `resolveDeal()`'s real relay/settle logic — proving compile → deploy → resolve
   actually composes, with only the paid oracle-attestation step faked (see above).
+- CI (`.github/workflows/ci.yml`): `forge test` for the contracts, `tsc --noEmit` + `node --test` for
+  each server package, lint + a full `next build` for the site — verified against a genuinely fresh
+  clone (not the working copy) before committing, which caught its own real bug: a bare `tsc --noEmit`
+  on `site/` fails on a first-time checkout, since Next only generates its ambient types
+  (`LayoutProps`, etc.) during a build or dev run. `next build`'s internal TypeScript check covers it
+  instead.
 
 What's deliberately not done yet, because it costs real money or needs information this pass
 couldn't get:
