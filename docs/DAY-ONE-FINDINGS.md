@@ -881,18 +881,16 @@ viem: `recoverTransactionAddress` recovers to the agent's real signing-key addre
 matches byte-for-byte what was sent. Real transaction, real signature, real verification — just
 never broadcast, so no gas spent and no dependency on that key holding any balance.
 
-**Wired into the deployed webhook's code, not its live configuration.**
-`site/app/api/resolve/[address]/route.ts` now tries `ONE_CLAW_RESOLVER_AGENT_ID`/
-`ONE_CLAW_RESOLVER_AGENT_API_KEY`/`ONE_CLAW_RESOLVER_ADDRESS` first (routing both the payment
-signature and the on-chain writes through 1Claw, no private key in the process at all) and falls
-back to `EVM_PRIVATE_KEY` if those aren't all set. **Deliberately not activated on the actual
-deployment** — those three env vars are not set there. The reasoning: every other real-money action
-in this project has been a one-off, explicitly requested action with a visible, bounded outcome.
-Setting real 1Claw credentials on the live webhook is different in kind — it makes a *standing*
-endpoint capable of autonomously spending real `$IMD` on any future trigger (a real Automation firing,
-or anyone who has the webhook secret), not a single bounded action. That's a real decision for
-whoever owns this deployment to make deliberately, not something to default into as a side effect of
-"the code now supports it."
+**Wired into the deployed webhook's code, and — as of 2026-09-29 — its live configuration too** (see
+the third addendum below for the activation itself). `site/app/api/resolve/[address]/route.ts` tries
+`ONE_CLAW_RESOLVER_AGENT_ID`/`ONE_CLAW_RESOLVER_AGENT_API_KEY`/`ONE_CLAW_RESOLVER_ADDRESS` first
+(routing both the payment signature and the on-chain writes through 1Claw, no private key in the
+process at all) and falls back to `EVM_PRIVATE_KEY` if those aren't all set. Setting real 1Claw
+credentials on a live webhook is different in kind from every other real-money action in this project
+so far (all one-off, explicitly requested, visible, bounded outcomes) — it makes a *standing* endpoint
+capable of autonomously spending real `$IMD`/gas on any future trigger, not a single bounded action.
+That distinction is exactly why this was asked about separately, rather than folded into a general
+go-ahead to fix other things.
 
 **Addendum — tried the real broadcast, and it failed, for a specific, identified reason.** Ran
 `scripts/base-mainnet-oneclaw-relay-demo.ts` for real: funded the 1Claw signing key with real ETH,
@@ -942,13 +940,28 @@ and briefly looked like nothing had happened).
 
 This closes the gap for real: `oneClawSignAndBroadcastRelay` is wired into
 `site/app/api/resolve/[address]/route.ts` as the actual relay used when the `ONE_CLAW_RESOLVER_*` env
-vars are set (still not activated on the live deployment — see the standing-endpoint reasoning above,
-which is unaffected by this). `oneClawTransactionRelay` (the simpler, single-hop version) is kept
-as-is in `@verdict/resolver` for if/when 1Claw's own broadcaster gets fixed, at which point it becomes
-the better default again — but it isn't the one used today. Retiring `EVM_PRIVATE_KEY` for the
-resolver's on-chain writes is now genuinely possible, not just signable; `EVM_PRIVATE_KEY` remains
-required only for the ops-wallet-driven demo scripts (`base-mainnet-demo.ts`, etc.), not for a real
-resolver's core writes.
+vars are set. `oneClawTransactionRelay` (the simpler, single-hop version) is kept as-is in
+`@verdict/resolver` for if/when 1Claw's own broadcaster gets fixed, at which point it becomes the
+better default again — but it isn't the one used today. Retiring `EVM_PRIVATE_KEY` for the resolver's
+on-chain writes is now genuinely possible, not just signable; `EVM_PRIVATE_KEY` remains required only
+for the ops-wallet-driven demo scripts (`base-mainnet-demo.ts`, etc.), not for a real resolver's core
+writes.
+
+**Third addendum — activated on the live deployment, 2026-09-29.** Everything above was built and
+proven, but deliberately not turned on for the real webhook — making it a standing endpoint able to
+spend real `$IMD`/gas on any future trigger is a decision, not a default, and needed asking for
+separately from the general go-ahead to fix other things. Asked, and told to activate the 1Claw path
+specifically (not `EVM_PRIVATE_KEY`). Set `ONE_CLAW_RESOLVER_AGENT_ID`/`_AGENT_API_KEY`/`_ADDRESS` on
+the production Vercel deployment, reusing the `verdict-extraction` agent (§17) and its already-proven
+Base signing key (`0x2590fc6823ede90dbebac41bb5759c14555e6aab`) rather than provisioning a fresh
+resolver-only agent — accepting a real tradeoff (shared blast radius if that one agent's key ever
+leaks) in favor of not introducing new Intents API setup risk (§20 found four real bugs getting a
+*first* agent working) into a live activation. Redeployed
+(`vercel deploy --prod`) so the new env vars actually take effect, then confirmed the redeployed
+webhook is healthy with a real request against a nonexistent deal address
+(`404 "no deal registered for 0x000...dead"`) — proves the deployment and auth work; the signer path
+itself only actually engages once a real registered deal's deadline fires, which hasn't happened yet
+against this configuration.
 
 ## 23. `/new` can now actually deploy the escrow — proven on the underlying mechanism, not the UI itself
 

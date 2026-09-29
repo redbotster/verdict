@@ -89,12 +89,17 @@ Each package has its own README with the real depth. This one's just for "does i
   Typed-data signing (IMD's payment, §20) and transaction signing (§22) both work for real through
   1Claw. 1Claw's own broadcast infrastructure fails to deliver a signed transaction, but the
   self-broadcast alternative — sign via 1Claw, broadcast the raw tx via a normal RPC directly
-  (`oneClawSignAndBroadcastRelay`) — is built and proven for real on Base mainnet. The deployed
-  webhook's code prefers this 1Claw path when configured and falls back to the raw key; its live
-  configuration deliberately doesn't set 1Claw credentials yet, since doing so would make a standing
-  endpoint able to spend real `$IMD` on any future trigger — a decision, not a default.
-- The deployed webhook has no signer configured at all right now (neither path) — it stops cleanly
-  at that point rather than relay anything.
+  (`oneClawSignAndBroadcastRelay`) — is built and proven for real on Base mainnet.
+- **The deployed webhook's live signer is now activated** (2026-09-29): `ONE_CLAW_RESOLVER_AGENT_ID`/
+  `_AGENT_API_KEY`/`_ADDRESS` are set on the production Vercel deployment, routing both IMD's payment
+  signature and the resolver's on-chain writes through the same 1Claw agent already proven live this
+  session (§20's payment signing, §22's transaction signing and broadcast) — no raw private key in
+  the process. This is a deliberate decision made explicitly for this activation, not a default: it
+  makes the webhook a standing endpoint able to spend real `$IMD`/gas on any future trigger. Reuses
+  the same agent as `server/oracle-compiler`'s LLM extraction (`verdict-extraction`) rather than a
+  freshly-provisioned resolver-only agent — a real tradeoff (shared blast radius if that one agent's
+  key ever leaks) accepted for reliability, since this exact agent's Intents API configuration was
+  already proven correct, rather than risking new setup bugs on a fresh one during a live activation.
 - A second real request finally got a successful attestation (§19), but the exact signature/signer
   values weren't captured in that run's log (an output-capture issue, not a shape/parsing failure —
   see §19). The disagreement risk from §15 is real and worth knowing either way; §19 shows one way to
@@ -163,6 +168,6 @@ order it was found:
 | 19 | Topped up `$IMD` with a second real swap, and got the first-ever successful (non-disagreed) real attestation |
 | 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |
 | 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |
-| 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet |
+| 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet; now activated on the live resolver webhook |
 | 23 | `/new` can now actually deploy the escrow (payer approves + deploys); mechanism proven on local Anvil, not yet a real browser click-through |
 | 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |
