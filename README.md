@@ -21,7 +21,7 @@ compiles a real question against the live IMD API, deploys the real contract bou
   implemented and confirmed against the live API; the Permit2/quote-approval signing step is
   intentionally left unimplemented pending IMD's real signing schema (see findings doc).
 - `server/oracle-compiler/` — the English-deal-to-oracle-question compiler: extract → match a vetted
-  template → lint → free dry-run quote. Two of three templates live-verified against `api.imd.fun`.
+  template → lint → free dry-run quote. All three templates now live-verified against `api.imd.fun`.
 - `server/resolver/` — the agent that acts at a deal's deadline: relays the signed attestation and
   settles the escrow. Chain interaction is real and integration-tested against the actual compiled
   contract on a local Anvil chain; the IMD payment-signing and oracle-result-fetching steps are
@@ -55,7 +55,11 @@ the full six-week shape. What exists right now:
   and `compileDeal()`'s free dry-run against IMD — see its own README for what's live-verified vs.
   not. Building it surfaced a real product-design correction: `consumer` doesn't affect
   `questionHash` (see `docs/DAY-ONE-FINDINGS.md` §5), which simplified the intended two-phase
-  compile/pin design down to "compile already gives you the binding hash."
+  compile/pin design down to "compile already gives you the binding hash." Its third and last
+  template (`onchain_event`) is now live-verified too — the spec's own table lists
+  `guards: { toleranceBps: 0 }` for it, but that field causes a bare 400 on the real API regardless of
+  anything else in the body; found by bisecting a known-working body field by field
+  (`docs/DAY-ONE-FINDINGS.md` §6). Fixed to use `sources`/`minSources` like the other two templates.
 - Both `imd-client` and `oracle-compiler` now have `npm run typecheck` (`tsc --noEmit`) — Node's
   native TypeScript execution only strips types, it doesn't check them, which is how a template
   builder silently omitting the required top-level `chainId` field went undetected until a live

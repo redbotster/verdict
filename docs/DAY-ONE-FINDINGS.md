@@ -99,6 +99,31 @@ Built while implementing `server/oracle-compiler` (2026-09-28). Two follow-ups t
   chain whose blocks get pinned for the evidence window) is a required field with no default; omitting
   it also produces the same unhelpful bare `400 invalid_request`.
 
+## 6. The on-chain-event template's `guards.toleranceBps` breaks schema validation
+
+Built and confirmed while closing out `server/oracle-compiler`'s last unverified template (2026-09-29).
+The spec's own template table lists `guards: { toleranceBps: 0 }` as the on-chain event template's
+guard shape (distinct from the panel-evidence templates' `sources`/`minSources`). Testing it: a
+well-formed `oracle.request` body with `evidence: "chain"` and `guards: { toleranceBps: 0 }` (with or
+without `sources`/`minSources` also present) returns a bare `400 invalid_request` — no `detail`, no
+`problems`, same unhelpful shape as every other schema-level rejection found so far.
+
+Isolated by bisection: starting from a known-`201` `release_published` body (panel evidence,
+`guards: { sources, minSources }`) and changing exactly one field at a time — `evidence` to `"chain"`
+(still `201`), `quorum` to equal `panelSize` at `5/5` (still `201`), the question text and
+`definitions.project` to the on-chain-style wording (still `201`) — every single-field change kept
+succeeding, until adding `toleranceBps` to `guards` (in any combination, with or without
+`sources`/`minSources` alongside it) flipped the same body to `400`. Removing `toleranceBps` and
+keeping only `sources`/`minSources` (same pattern as the other two templates) returns `201` again, with
+a real `questionHash` and pinned block range.
+
+**Fix applied**: `onchainEventTemplate` no longer emits `toleranceBps` at all; it builds
+`guards: { sources: [<block explorer token URL>], minSources: 1 }` like the other templates. The
+explorer URL is chosen from a small hardcoded chainId → domain map (Ethereum/Sepolia/Base/Base Sepolia)
+with an Etherscan fallback for unlisted chains — wrong for those chains specifically, but a
+present-and-wrong source satisfies schema validation, where an absent one doesn't. All three templates
+are now live-verified end-to-end.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - The exact EIP-712 `quoteApprovalTypedData` schema (domain/types) IMD expects for the second

@@ -2,10 +2,24 @@ import type { Extraction } from "../types.ts";
 import { baseInput, calendarWindow, MISSING_RULE } from "./common.ts";
 import type { BuildContext, Template } from "./types.ts";
 
-// UNCONFIRMED against the live API: only the release_published shape has actually been dry-run against
-// api.imd.fun (see docs/DAY-ONE-FINDINGS.md). The "chain" evidence type's exact guard fields
-// (does it want `sources` at all? a block explorer URL? none of these dry-run tested) are the spec's
-// own best guess, not verified. Treat a 422 here as informative, not a sign this file is broken.
+// Live-verified against api.imd.fun 2026-09-29 (see docs/DAY-ONE-FINDINGS.md). The spec's own template
+// table lists `guards: { toleranceBps: 0 }` for this template — that field causes a bare 400 on this
+// API. What actually works: `evidence: "chain"` needs `guards.sources`/`minSources` exactly like the
+// panel-evidence templates, with `toleranceBps` omitted entirely. Chain coverage below is limited to
+// what's needed for a real explorer link; other chains fall back to Etherscan's URL shape, which is
+// wrong for them, but a wrong-but-present source beats an absent one for schema validation.
+const EXPLORERS: Record<number, string> = {
+  1: "https://etherscan.io",
+  11155111: "https://sepolia.etherscan.io",
+  8453: "https://basescan.org",
+  84532: "https://sepolia.basescan.org",
+};
+
+function explorerTokenUrl(chainId: number, tokenAddress: string): string {
+  const base = EXPLORERS[chainId] ?? EXPLORERS[1];
+  return `${base}/token/${tokenAddress}`;
+}
+
 export const onchainEventTemplate: Template = {
   kind: "onchain_event",
 
@@ -34,7 +48,7 @@ export const onchainEventTemplate: Template = {
           calendar,
           missing: MISSING_RULE,
         },
-        guards: { toleranceBps: 0 },
+        guards: { sources: [explorerTokenUrl(e.chainId!, e.tokenAddress!)], minSources: 1 },
       },
       e.chainId!,
     );

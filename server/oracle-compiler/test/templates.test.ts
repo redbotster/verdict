@@ -88,6 +88,8 @@ test("onchainEventTemplate: builds with evidence 'chain' and full quorum", () =>
   assert.equal(input.evidence, "chain");
   assert.equal(input.quorum, 5);
   assert.equal(input.panelSize, 5);
-  assert.equal(input.guards.toleranceBps, 0);
+  // toleranceBps deliberately not emitted — confirmed live to cause a bare 400 (see types.ts)
+  assert.equal(input.guards.minSources, 1);
+  assert.match(input.guards.sources?.[0] ?? "", /sepolia\.etherscan\.io\/token/);
   assert.equal(input.consumer.chainId, 11155111); // uses the extracted chain, not ctx.evidenceChainId
 });

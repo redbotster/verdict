@@ -19,8 +19,9 @@ from one of three vetted templates.
 4. **Dry-run quote** (`src/compile.ts`, `compileDeal()`) — calls IMD's `POST /requests/quote`, which
    is free even on failure. A 422 is fed back into one bounded extraction retry before giving up.
 5. **Dual approval** — `approvalSummaryFromOrder()` turns a quote's response into the plain-language
-   payload (question, sources, quorum, `questionHash`, pinned block range) that a future status page
-   would show both parties. Actually building that page is out of scope here.
+   payload (question, sources, quorum, `questionHash`, pinned block range) that both parties review
+   and sign off on. `site/app/new` implements this UI (a different path through the same underlying
+   template/lint/quote logic, since it takes structured form input instead of LLM extraction).
 
 ## A load-bearing finding from building this
 
@@ -37,17 +38,20 @@ automatically; anything else that builds a `consumer` or address field by hand s
 
 ## Status
 
-- `release_published` and `page_or_file_live` templates: **live-verified** — their built bodies get a
-  real `201`/quote from `api.imd.fun`, for free, with a real `questionHash` and pinned block range back.
-- `onchain_event`: **not live-verified**. The spec's own table only says `guards: { toleranceBps: 0 }`
-  for the "chain" evidence type; whether `sources` is also expected isn't confirmed. Treat a 422 here
-  as informative, not a sign the code is broken — see the comment in `src/templates/onchainEvent.ts`.
+- All three templates — `release_published`, `page_or_file_live`, and `onchain_event` — are
+  **live-verified**: their built bodies get a real `201`/quote from `api.imd.fun`, for free, with a
+  real `questionHash` and pinned block range back. `onchain_event` needed a real fix first: the spec's
+  own template table says `guards: { toleranceBps: 0 }` for the "chain" evidence type, but that field
+  causes a bare `400` on the live API regardless of anything else in the body — confirmed by bisecting
+  a known-working body field by field until isolating it. The working shape is `guards.sources` +
+  `minSources`, same as the panel-evidence templates, with `toleranceBps` omitted entirely. See
+  `src/templates/onchainEvent.ts` and `docs/DAY-ONE-FINDINGS.md` §6.
 - Extraction (`extractDealFields`) has not been run against a real model in this pass — no
   `AI_GATEWAY_API_KEY` was available. Everything downstream of extraction (lint, template
   matching/building, dry-run) is unit-tested and separately live-smoke-tested by injecting a fixed
   extraction directly, bypassing the LLM call.
-- Not built: the actual dual-approval UI (that's `site/`'s job) and the resolver that calls this at
-  the deadline (that's `server/resolver/`'s job, not yet built either).
+- Built elsewhere: `site/app/new` implements the dual-approval UI, and `server/resolver` is the agent
+  that calls this compiler's output at a deal's deadline.
 
 ## Local setup
 

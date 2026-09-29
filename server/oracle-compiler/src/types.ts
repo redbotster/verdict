@@ -37,7 +37,9 @@ export interface OracleRequestInput {
     calendar: string;
     missing: string;
   };
-  guards: { sources?: string[]; minSources?: number; toleranceBps?: number };
+  // `toleranceBps` deliberately omitted — confirmed live 2026-09-29 that it causes a bare 400
+  // regardless of anything else in the body, despite the spec's own template table listing it.
+  guards: { sources?: string[]; minSources?: number };
   consumer: { chainId: number; verifyingContract: string };
 }
 
