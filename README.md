@@ -7,6 +7,10 @@ Contract security audit — 3 High + 3 Medium + 5 Low + 1 Info, **all fixed**, p
 static-analysis pass: [audits/2026-09-28/AUDIT-REPORT.md](audits/2026-09-28/AUDIT-REPORT.md).
 Still not a substitute for a paid human audit before any mainnet deployment — see the report's
 closing note.
+**End-to-end proof** that the pieces actually compose (not just pass their own tests):
+[`server/resolver/scripts/e2e-demo.ts`](server/resolver/README.md#end-to-end-demo-scriptse2e-demots)
+compiles a real question against the live IMD API, deploys the real contract bound to IMD's actual
+`questionHash`, and relays/settles it — real at every step except the one that costs real money.
 
 ## Layout
 
@@ -65,6 +69,10 @@ the full six-week shape. What exists right now:
   `npm run deploy-demo` deploys a real escrow to local Anvil and settles it, so the page was actually
   checked against genuine on-chain state in a real browser (screenshots, zero console errors, correct
   numbers on both the list page and a settled deal page).
+- The full pipeline, tied together for real: `server/resolver/scripts/e2e-demo.ts` compiles a deal
+  through the live IMD API, deploys the real contract bound to the real resulting `questionHash`, and
+  runs it through `resolveDeal()`'s real relay/settle logic — proving compile → deploy → resolve
+  actually composes, with only the paid oracle-attestation step faked (see above).
 
 What's deliberately not done yet, because it costs real money or needs information this pass
 couldn't get:
@@ -73,7 +81,8 @@ couldn't get:
 - 1Claw vault/policy/automation wiring (needs the Permit2 signing schema resolved first).
 - Extraction has not been run against a real LLM (no Gateway API key available this pass) — everything
   downstream of it is tested by injecting a fixed extraction directly.
-- The dual-approval / status page UI (`site/`).
+- The dual-approval UI (both parties reviewing and signing off on the pinned question before
+  funding) — `site/` covers the read-only status view, not this.
 - Funding the ops wallet.
 
 ## Local setup

@@ -56,6 +56,31 @@ implementations — same pattern as `imd-client`'s `pay()` and `oracle-compiler`
   true/false branch logic) — unit-tested with fake wallet/public clients, independent of both the
   chain and the unconfirmed IMD steps above.
 
+## End-to-end demo (`scripts/e2e-demo.ts`)
+
+Proves the whole pipeline composes, not just that each package passes its own tests in isolation.
+Runs the real thing at every step that's free and confirmed:
+
+1. `oracle-compiler`'s `compileDeal()` — a **real, free network call to `api.imd.fun`** — for a
+   fabricated deal (extraction is faked; no LLM key available in this environment). Returns IMD's
+   actual, binding `questionHash`.
+2. Deploys the **real compiled `MilestoneEscrow` bytecode** to a local Anvil chain, constructor-bound
+   to that exact hash from IMD.
+3. `pinQuestion()` — another real, free IMD call, registering the real deployed address.
+4. `resolveDeal()` — real relay and settle logic, faking only the one step that costs real IMD tokens
+   on mainnet and needs an unconfirmed signing scheme (getting the actual paid attestation).
+5. Reads back the final state with this package's own `readEscrowState()` — the same fields
+   `site/lib/escrow.ts` renders.
+
+```
+npm run e2e-demo
+```
+
+Last run: IMD returned a real `questionHash`, the escrow deployed and bound to it correctly, the
+relay and automatic settle-after-challenge-window retry both succeeded, and the payee ended up
+credited 990 USDC on a 1000 USDC deal at a 1% fee — exactly the expected math, computed by the real
+contract, not asserted by the script.
+
 ## Local setup
 
 ```
