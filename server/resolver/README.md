@@ -61,7 +61,36 @@ saved to also confirm the signature verifies on-chain).
   failure.
 - **`ApprovalGate`** (`src/approval.ts`) — 1Claw's Human-Readable Action Approvals aren't wired up.
   The threshold *logic* (`needsApproval`) is real and tested; only the "ask a human" transport is a
-  stub.
+  stub. **This can't be a simple synchronous stub even once wired**: 1Claw's real approval mechanism
+  (`docs.1claw.co/docs/automations/overview`, confirmed live 2026-09-29) is an `approval_request`
+  Automation step that parks the run in `awaiting_approval` for up to 72 real hours, resumed by a
+  human via dashboard/email/phone/API (`POST /v1/approvals/{id}/decide`) — not a function a Vercel
+  webhook can block on. A real implementation needs an async design (raise the approval, return, get
+  resumed later), not a `Promise` that just takes a while to settle.
+- **`resolveDeal()`'s approval gate now only blocks `release()`, never `submitAttestation()`.**
+  Previously an above-threshold payout (the *default*, since a registered deal's threshold defaults to
+  `0` and nothing was ever wired to approve it — meaning **every** true-answer deal hard-failed with
+  `ApprovalNotWiredError` before this fix, not an edge case) meant the real oracle answer was never
+  even recorded on-chain. Now `submitAttestation()` always happens once a true attestation is
+  obtained — it moves no funds and starts the challenge window regardless of approval — and only
+  `release()` (the actual fund movement) is gated. An unwired or denied gate is no longer a thrown
+  error: `resolveDeal()` returns `{ relayed: true, settled: false, settleBlockedReason:
+  "approval_required", ... }`, a normal, non-exceptional outcome. A human can settle it manually by
+  calling `release()` directly (permissionless, see `relay.ts`) until a real approval gate is built.
+  `site/app/new` now has an "approval threshold" field so an operator can explicitly opt a deal into
+  auto-settlement (set the threshold at or above the deal's payout) instead of the previous silent,
+  invisible default of "every deal needs an approval that can never come."
+- **Known, unresolved contract-level limitation, found while tracing this through**: once
+  `submitAttestation()` sets `trueAt != 0` on a true answer, `MilestoneEscrow.sol`'s `reclaim()` is
+  permanently blocked (`if (trueAt != 0) revert AlreadyTrue()`) — `release()` becomes the *only* way
+  to ever move the funds. If a real approval gate is ever wired and a human denies an above-threshold
+  payout after the attestation has already landed, **the funds have no on-chain recovery path** at
+  all — not a hang, a genuine dead end. This isn't introduced by the fix above (the gate was already
+  positioned to make an approved/denied decision on a true answer; this risk existed as soon as any
+  real gate could deny one) — it's a pre-existing contract design gap this session surfaced, not
+  fixed. Worth a real design discussion (e.g. a time-boxed override, or making `release()` itself
+  the only fund-moving action and treating a denial as "wait for a human to call it," never a hard
+  refusal) before wiring a real gate that can actually say no.
 
 ## Vault-backed secrets (`src/vaultSecrets.ts`)
 

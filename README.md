@@ -106,6 +106,13 @@ Each package has its own README with the real depth. This one's just for "does i
   (`site/scripts/deploy-self-service-test.ts`), not yet a real click-through with an actual wallet
   extension in a real browser against a real chain. Deploying elsewhere and pasting the address into
   the "register the deployed escrow" step (real, live-verified, §21) still works as before.
+- No real human-approval gate for above-threshold payouts (§24). Two real bugs in this area are now
+  fixed — `resolveDeal()` no longer re-spends real `$IMD` on a retry, and an above-threshold deal no
+  longer hard-fails the whole resolution — but an actual 1Claw-backed approval flow (async, since
+  1Claw's real mechanism can park a run for up to 72 hours) isn't built yet; a human has to call
+  `release()` manually for now. Separately, §24 also surfaced a real, unresolved contract-level gap:
+  once a true attestation lands on-chain, a denied approval would leave funds with no recovery path at
+  all — worth a real design conversation before wiring a gate that can actually deny anything.
 
 ## Ops wallet
 
@@ -158,3 +165,4 @@ order it was found:
 | 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |
 | 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet |
 | 23 | `/new` can now actually deploy the escrow (payer approves + deploys); mechanism proven on local Anvil, not yet a real browser click-through |
+| 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |

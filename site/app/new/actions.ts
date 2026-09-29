@@ -90,6 +90,15 @@ export interface RegisterDealInput {
   githubRepo: string;
   input: OracleRequestInput;
   questionHash: string;
+  /**
+   * Base units, optional. resolveDeal() only auto-calls release() when payoutEstimateBaseUnits is
+   * below this — left unset (or 0), *every* true answer needs a human to call release() manually,
+   * since there's no automated approval mechanism wired up yet (see docs/DAY-ONE-FINDINGS.md §22's
+   * addendum on resolveDeal()'s approval gate). That's the deliberately conservative default: an
+   * operator opts into auto-settlement by setting this at or above the deal's own payout, not the
+   * other way around.
+   */
+  approvalThresholdBaseUnits?: string;
 }
 
 export type RegisterDealResult = { ok: true } | { ok: false; error: string };
@@ -131,6 +140,7 @@ export async function registerDeal(form: RegisterDealInput): Promise<RegisterDea
       oracleInput: form.input,
       expectedQuestionHash: form.questionHash as `0x${string}`,
       payoutEstimateBaseUnits,
+      approvalThresholdBaseUnits: form.approvalThresholdBaseUnits || undefined,
     });
   } catch (err) {
     return { ok: false, error: `Could not save to the database: ${err instanceof Error ? err.message : String(err)}` };

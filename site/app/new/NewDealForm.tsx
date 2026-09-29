@@ -63,6 +63,7 @@ export function NewDealForm() {
   const [deployedAddress, setDeployedAddress] = useState("");
   const [rpcUrl, setRpcUrl] = useState("");
   const [chainId, setChainId] = useState("1");
+  const [approvalThreshold, setApprovalThreshold] = useState("");
   const [registerStatus, setRegisterStatus] = useState<"idle" | "pending" | "done">("idle");
   const [registerError, setRegisterError] = useState<string | null>(null);
 
@@ -227,6 +228,7 @@ export function NewDealForm() {
       githubRepo: form.githubRepo,
       input: compiled.input,
       questionHash: compiled.questionHash,
+      approvalThresholdBaseUnits: approvalThreshold,
     });
     if (!result.ok) {
       setRegisterStatus("idle");
@@ -406,6 +408,12 @@ export function NewDealForm() {
           </Field>
           <Field label="Chain ID">
             <input type="number" className={inputClass} value={chainId} onChange={(e) => setChainId(e.target.value)} />
+          </Field>
+          <Field
+            label="Approval threshold (token base units, optional)"
+            hint={`Leave blank to require a human to manually call release() for any true answer — there's no automated approval flow wired up yet, so this is the safe default. Set it to at least the deal amount (${form.amount}) to auto-settle without any manual step.`}
+          >
+            <input className={inputClass} placeholder={`e.g. ${form.amount} to always auto-settle`} value={approvalThreshold} onChange={(e) => setApprovalThreshold(e.target.value)} />
           </Field>
           <button
             disabled={registerStatus === "pending" || !deployedAddress || !rpcUrl}

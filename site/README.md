@@ -70,14 +70,17 @@ and both are server-only.
   still layers local-only entries on top for local dev — a local Anvil demo, ephemeral by nature, so
   it's never written into the persistent table.
 
-  `/new`'s "Register the deployed escrow" step writes to it for real: paste the address you deployed
-  with the "done" step's payload, and `registerDeal()` (`app/new/actions.ts`) reads its real on-chain
-  `questionHash`/`amount`/`feeBps`, refuses to save anything whose on-chain `questionHash` doesn't
-  match what was actually compiled, computes the fee-adjusted payout estimate with the same math as
-  `MilestoneEscrow.sol` itself, and writes the row. `/new` still doesn't deploy anything itself (see
-  "What this doesn't do" below) — this step only registers something already deployed elsewhere.
-  Live-verified end to end with `scripts/register-deal-demo.ts` — see
-  `docs/DAY-ONE-FINDINGS.md` §21.
+  `/new`'s "Register the deployed escrow" step writes to it for real: paste the address (or use the
+  one the deploy step above just filled in), and `registerDeal()` (`app/new/actions.ts`) reads its real
+  on-chain `questionHash`/`amount`/`feeBps`, refuses to save anything whose on-chain `questionHash`
+  doesn't match what was actually compiled, computes the fee-adjusted payout estimate with the same
+  math as `MilestoneEscrow.sol` itself, and writes the row — this step works the same whether the
+  escrow was deployed via `/new` itself or elsewhere. Live-verified end to end with
+  `scripts/register-deal-demo.ts` — see `docs/DAY-ONE-FINDINGS.md` §21. It also takes an optional
+  "approval threshold" — `resolveDeal()` defaults every deal to needing manual settlement above `0`
+  base units (no automated approval gate is wired up, see §24), so an operator explicitly opts a deal
+  into auto-settlement by setting this at or above the deal's own payout, rather than that being an
+  invisible default nobody could see or change.
 
 ## Demo deal, for local development
 

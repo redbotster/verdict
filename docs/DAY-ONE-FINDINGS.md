@@ -984,6 +984,65 @@ a user who might reject or delay between them, real gas estimation) hasn't been 
 needs an actual manual run before trusting this for a real deal between real counterparties, same
 caveat as every other real-money action in this project.
 
+## 24. Two real production-readiness bugs, found by tracing the resolver's retry and approval paths
+
+Asked "what's left before this is production ready" and traced the actual code paths rather than
+just listing known gaps. Found two real, previously undocumented bugs — not hypothetical, both
+confirmed by reading the exact logic that runs today.
+
+**Bug 1 — `resolveDeal()` was never idempotent, so a retry silently re-spent real `$IMD`.** Every
+invocation called `client.quote("oracle.request", input, randomUUID())` and minted a fresh
+`generateClientToken()`, with no check for prior state. A retried Automation trigger, a crash-and-
+retry, or a duplicate webhook call would buy a brand new real IMD attestation every time — and per
+§15, a second real request isn't even guaranteed to produce the same answer.
+
+**Fix**: `resolveDeal()` now reads the escrow's own on-chain `state`/`trueAt` (the contract's
+permanent record) before ever calling `getAttestation()`. `state != Funded` (Released or Refunded —
+Refunded is set immediately inside `submitAttestation()` on a false answer, not just via `release()`)
+short-circuits to `{ relayed: false, reason: "already_resolved" }`, zero IMD cost. `trueAt != 0`
+(a true answer already landed from a prior run) skips straight to attempting `release()` — again, zero
+IMD cost, and safe from ever getting a *different* answer on retry. Both are exercised by tests in
+`resolve.test.ts`.
+
+**Bug 2 — every registered deal defaulted to needing an approval that could never come, so no real
+deal could ever auto-settle.** `app/new/actions.ts`'s `registerDeal()` never set
+`approvalThresholdBaseUnits`, so it was always `0` in Supabase; `needsApproval(payout, 0n)` is true for
+any positive payout; and `NOT_IMPLEMENTED_APPROVAL_GATE` always throws. The result: **any deal that
+resolved `true` hard-failed the whole webhook with `ApprovalNotWiredError`** — not an edge case, the
+default path for every deal ever registered through `/new`.
+
+Looked into building a real approval gate to fix this properly, and found it's a bigger job than
+expected: 1Claw's actual approval mechanism (`docs.1claw.co/docs/automations/overview`, confirmed
+live) is an `approval_request` Automation step that **parks the run for up to 72 real hours**, resumed
+by a human via dashboard/email/phone/`POST /v1/approvals/{id}/decide` — not something a serverless
+webhook invocation can block on. A correct implementation needs an async design (raise the approval,
+return immediately, get resumed later via a callback), which in turn needs a small live Supabase
+schema change (persisting which automation/run is pending, per deal) to be idempotent across retries.
+Scoped that out of this pass — see the "not yet done" note below.
+
+**Fix actually shipped this pass**: reordered `resolveDeal()` so the approval gate only blocks
+`release()` (the fund-moving action), never `submitAttestation()` (harmless, permanent, starts the
+challenge window regardless). An unwired or denied gate is no longer a thrown error — it's
+`{ relayed: true, settled: false, settleBlockedReason: "approval_required", ... }`, letting the real
+oracle answer land on-chain immediately while release() waits for a human to either wire a real gate
+or call `release()` manually (permissionless, per the contract's own design). `/new` also gained an
+"approval threshold" field so an operator can explicitly opt a deal into auto-settlement, instead of
+an invisible default nobody could see or change.
+
+**Real contract-level finding, surfaced but not fixed**: once `submitAttestation()` sets `trueAt != 0`
+on a true answer, `MilestoneEscrow.sol`'s `reclaim()` is permanently blocked
+(`if (trueAt != 0) revert AlreadyTrue()`) — `release()` becomes the *only* remaining way to move
+funds. If a real approval gate is ever wired and denies an above-threshold payout after the
+attestation has already landed, **the funds have no on-chain recovery path at all.** This isn't
+something the fix above introduced — the risk exists the moment any real gate can say "no" to a true
+answer — but it's a genuine, unresolved contract-design gap worth a real conversation before wiring
+an approval gate that can actually deny anything. Filed here rather than silently deferred.
+
+**Not yet done, scoped out deliberately**: the full async 1Claw `approval_request` integration
+(automation creation, run-status polling on retries, the Supabase schema addition) — a real, larger
+piece of work with a live-database dependency, left for a dedicated pass rather than folded into this
+one.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

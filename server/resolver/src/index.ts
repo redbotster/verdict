@@ -1,5 +1,5 @@
 export { resolveDeal, defaultGetAttestation, TransactionRelayNotConfiguredError } from "./resolve.ts";
-export type { ResolveDealParams, ResolveDealOptions, ResolveResult, GetAttestationFn } from "./resolve.ts";
+export type { ResolveDealParams, ResolveDealOptions, ResolveResult, GetAttestationFn, SettleBlockedReason } from "./resolve.ts";
 export { submitAttestation, release, reclaim, withdraw, readEscrowState, viemTransactionRelay, toAbiMessage } from "./relay.ts";
 export type { EscrowSnapshot, TransactionRelay } from "./relay.ts";
 export { oneClawTransactionRelay, oneClawSignAndBroadcastRelay, OneClawBroadcastFailedError } from "./oneClawRelay.ts";
