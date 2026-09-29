@@ -1075,6 +1075,100 @@ an approval gate that can actually deny anything. Filed here rather than silentl
 piece of work with a live-database dependency, left for a dedicated pass rather than folded into this
 one.
 
+## 25. CRITICAL: `MilestoneEscrow.sol`'s attestation scheme does not match IMD's real EIP-712 signature at all — no real attestation has ever been verifiable on-chain
+
+Went to close the §19 evidence gap (capture a real successful attestation's signature/signer and
+confirm it verifies) and found something much bigger: the contract's whole on-chain verification
+scheme for IMD's oracle answer is wrong, in a way that has never been caught because every real
+Base-mainnet demo so far (§12, §22) used a throwaway local key standing in for "the oracle signer,"
+never a genuine IMD-issued signature.
+
+**What was run**: one more real paid `oracle.request` (`scripts/imd-attestation-schema-verify.ts`,
+`page_or_file_live` against a single unambiguous URL, the §15 disagreement-avoidance trick), with a
+real, deliberate `consumer` (`{chainId: 1, verifyingContract: 0x1234...7890}`) instead of a placeholder.
+It resolved for real — quorum 4/4, `answer: true` — and the raw response was written straight to a
+file this time, closing §19's actual gap (an output-capture truncation, not a shape problem).
+
+**What was found, by then reading IMD's own real docs (`imd.fun/docs/`) properly**: the general
+`GET /oracle/requests/:id` status endpoint (the only one this codebase has ever called) does **not**
+return the signing domain/types at all — `oracleResult.ts`'s `parseSignedAttestation` was always
+guessing the EIP-712 shape from the contract's own assumed struct, never independently confirmed.
+There's a **separate, dedicated endpoint**, `GET /oracle/requests/:id/attestation`, that returns the
+actual `{domain, types, primaryType, message, signature, signer}` IMD signed with — this codebase has
+never called it. Fetched it for the already-paid request (free, a plain GET) and got the authoritative
+real answer:
+
+```json
+{
+  "domain": { "name": "IdentityMD Oracle", "version": "1", "chainId": 1, "verifyingContract": "0x1234...7890" },
+  "types": { "OracleAttestation": [
+    { "name": "requestId", "type": "bytes32" },
+    { "name": "chainId", "type": "uint256" },
+    { "name": "questionHash", "type": "bytes32" },
+    { "name": "answerType", "type": "uint8" },
+    { "name": "answer", "type": "bytes" },
+    { "name": "figure", "type": "uint256" },
+    { "name": "fromBlock", "type": "uint64" },
+    { "name": "toBlock", "type": "uint64" },
+    { "name": "blockHash", "type": "bytes32" },
+    { "name": "panelJobId", "type": "bytes32" },
+    { "name": "issuedAt", "type": "uint64" },
+    { "name": "expiresAt", "type": "uint64" }
+  ]},
+  "primaryType": "OracleAttestation"
+}
+```
+
+**Independently verified this is really what IMD signed with**: `recoverTypedDataAddress` using
+exactly this domain/types/primaryType/message recovers to
+[`0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982`](https://etherscan.io/address/0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982) —
+an exact match to the response's own `signer` field, confirmed by testing all six `answerType`
+enum values against `docs.imd.fun`'s listed order (`bool, address, bytes32, uint256, address[],
+bytes32[]`) and finding `0` (bool) is the only one that recovers correctly. **This is now the first
+independently confirmed real IMD oracle signer address** this project has ever had.
+
+**Compared against what `MilestoneEscrow.sol` actually checks on-chain today**:
+
+| Field | Contract assumes | IMD's real type |
+|---|---|---|
+| domain name | `"IMD-Attestation"` (never confirmed, used everywhere) | `"IdentityMD Oracle"` |
+| primaryType / struct name | `Attestation` | `OracleAttestation` |
+| `requestId` | `uint256` | `bytes32` |
+| `answerType` | `string` | `uint8` (enum) |
+| `answer` | `bool` | `bytes` (dynamic) |
+| `figure` | `string` | `uint256` |
+| `fromBlock` / `toBlock` | `uint256` | `uint64` |
+| `panelJobId` | `string` | `bytes32` |
+| `blockHash` | *(field doesn't exist)* | `bytes32` |
+
+EIP-712's type hash is `keccak256` of the struct's full type string, name included — a different
+struct name alone produces a completely different digest, before any field-type difference is even
+considered. **The domain name is also wrong.** Both facts together mean: **no real IMD-signed
+attestation has ever been able to verify against `MilestoneEscrow.sol`'s on-chain
+`ECDSA.recover`, including every escrow this project has ever deployed** — `ECDSA.recover` would
+compute a completely different digest than the one IMD actually signed, and recover to an
+unrelated, effectively-random address, never `oracleSigner`. This was never caught because every
+real Base-mainnet proof so far self-signed its own attestation with a throwaway key matching its
+*own* declared domain (self-consistent, never testing IMD's real behavior at all) — this is exactly
+the gap the README has been flagging as "IMD's real attestation signer address has never been
+confirmed," except it turns out to be much deeper than an address: the entire verification scheme
+needs to change.
+
+**Not fixed in this pass — this needs a real decision, not a silent rewrite.** Fixing this means: a
+new `MilestoneEscrow.sol` (or a parameterizable version of it) with the corrected domain name,
+struct name, and field types (including the new `blockHash` field this project's struct never had at
+all), a full re-audit of that change, updating every consumer (`server/resolver`'s `eip712.ts` and
+`oracleResult.ts`'s parsing, `site/lib/terms.ts`-adjacent attestation code, every demo script), and
+redeploying — every escrow deployed under the old contract (including the real Base mainnet ones from
+§12/§22) would need a fresh deployment under the corrected version; there's no way to patch an
+already-deployed contract's bytecode. Reported to the user rather than started unilaterally, given the
+scope and that it touches the project's core security-critical contract.
+
+**Spend accounting**: this real request used the project's last practical chunk of `$IMD`
+(0.5916 → 0.0917 remaining) — worth it, since it turned an assumed, never-tested contract scheme into
+a confirmed, precisely-identified, fixable bug instead of a real deal someday failing to settle for a
+reason nobody could diagnose.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

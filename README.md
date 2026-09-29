@@ -13,6 +13,22 @@ not what's assumed. Audit: [audits/2026-09-28/AUDIT-REPORT.md](audits/2026-09-28
 High + 3 Medium + 5 Low + 1 Info, all fixed. Still not a substitute for a paid human audit before
 anything real.
 
+## ⚠ Critical, unresolved: real IMD attestations can't verify on-chain yet (§25)
+
+`MilestoneEscrow.sol`'s on-chain check of IMD's oracle signature uses the wrong EIP-712 domain name
+and struct shape — confirmed for real, independently verified, 2026-09-29. IMD's real oracle signer is
+[`0x5598Aa91...Fd32982`](https://etherscan.io/address/0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982), and
+its real signature domain/struct (`"IdentityMD Oracle"`/`OracleAttestation`, with several field types
+different from what the contract assumes, plus a `blockHash` field the contract doesn't have at all)
+came straight from IMD's own dedicated `GET /oracle/requests/:id/attestation` endpoint — one this
+codebase had never called. **No escrow deployed under the current contract, including the real Base
+mainnet ones referenced below, can ever verify a genuine IMD attestation.** Every prior "real" proof of
+the contract's lifecycle used a throwaway local key standing in for the oracle signer, which is
+internally consistent but never actually exercised IMD's real behavior. Full details, the exact field
+comparison table, and independent recovery proof: `docs/DAY-ONE-FINDINGS.md` §25. Not fixed yet — it
+needs a corrected contract, a re-audit, and a fresh deployment, which is a real decision, not a
+same-pass fix.
+
 ## What actually works
 
 Two things blocked this project for most of its life and don't anymore.
@@ -26,6 +42,8 @@ Admitted on the first try:
 `MilestoneEscrow.sol`'s whole lifecycle — deploy, attest, release, withdraw — works for real on Base
 mainnet with real USDC:
 [`0xbf29...8442`](https://basescan.org/address/0xbf29b1008e153e6bd3cf1c25fbc9f09e08a48442).
+(That demo's oracle signer was a throwaway local key, not IMD's real one — see the warning above §25:
+the on-chain mechanics work, but real IMD attestation verification currently doesn't.)
 
 1Claw's vaults, automations, and signing are all live-verified against `api.1claw.co` too.
 
@@ -85,6 +103,14 @@ Each package has its own README with the real depth. This one's just for "does i
 
 ## What's not done
 
+- **`MilestoneEscrow.sol`'s attestation verification doesn't match IMD's real signature scheme at all
+  (§25, see the warning at the top of this file)** — the single most important open item. Practical
+  consequence for the webhook activated below: if a real registered deal's deadline fires, `resolveDeal()`
+  will get a real IMD attestation and try `submitAttestation()`, which will simply revert on-chain
+  (`ECDSA.recover` computes the wrong digest, so it can never equal `oracleSigner`) — real gas spent,
+  no funds at risk, but the deal will never actually settle, and (per §24's idempotency fix) every
+  retry will keep trying and keep reverting, since `trueAt` never gets set. Needs a corrected contract
+  and a fresh deployment before any real deal can ever resolve `true`.
 - Retiring `EVM_PRIVATE_KEY` for the resolver's on-chain writes is now genuinely closed (§22).
   Typed-data signing (IMD's payment, §20) and transaction signing (§22) both work for real through
   1Claw. 1Claw's own broadcast infrastructure fails to deliver a signed transaction, but the
@@ -129,7 +155,7 @@ Balances move with every demo run, so treat these as a snapshot, not current tru
 | Chain | Asset | ~Balance |
 |---|---|---|
 | Ethereum mainnet | ETH | 0.005 |
-| Ethereum mainnet | `$IMD` | 0.59 (two real requests spent 1.0 so far; topped up once via a real swap, §19) |
+| Ethereum mainnet | `$IMD` | 0.09 (three real requests spent 1.5 so far; topped up once via a real swap, §19) |
 | Base mainnet | ETH | 0.001 |
 
 ## Local setup
@@ -173,3 +199,4 @@ order it was found:
 | 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet; now activated on the live resolver webhook |
 | 23 | `/new` can now actually deploy the escrow (payer approves + deploys); proven on local Anvil, then proven again with a real browser click-through of the actual UI |
 | 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |
+| 25 | **CRITICAL, unresolved**: `MilestoneEscrow.sol`'s on-chain attestation check uses the wrong EIP-712 domain/struct — no real IMD attestation has ever been verifiable on-chain. Real oracle signer and real signing schema both confirmed for the first time, independently verified |
