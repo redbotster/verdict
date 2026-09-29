@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { createWalletClient, custom, type Address } from "viem";
-import { compileReleaseDeal, registerDeal, type CompileFormInput } from "./actions";
+import { createWalletClient, createPublicClient, custom, getContractAddress, type Address } from "viem";
+import { compileReleaseDeal, registerDeal, getDeploymentArtifact, type CompileFormInput } from "./actions";
 import { computeTermsHash } from "@/lib/terms";
 import type { OracleRequestInput } from "@verdict/oracle-compiler";
+
+const ERC20_APPROVE_ABI = [
+  { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ type: "address" }, { type: "uint256" }], outputs: [{ type: "bool" }] },
+] as const;
 
 type Step = "form" | "compiled" | "signed" | "done";
 
@@ -61,6 +65,10 @@ export function NewDealForm() {
   const [chainId, setChainId] = useState("1");
   const [registerStatus, setRegisterStatus] = useState<"idle" | "pending" | "done">("idle");
   const [registerError, setRegisterError] = useState<string | null>(null);
+
+  const [deployStatus, setDeployStatus] = useState<"idle" | "approving" | "deploying" | "done">("idle");
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [deployTxHashes, setDeployTxHashes] = useState<{ approve?: `0x${string}`; deploy?: `0x${string}` }>({});
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -132,6 +140,79 @@ export function NewDealForm() {
       setStep("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Deploys the real contract with the payer's connected wallet — the payer has to approve the token
+  // spend anyway (the constructor pulls `amount` via transferFrom), so the payer is also the one who
+  // pays gas to deploy. The escrow address isn't known until deployment, so this approves a
+  // nonce-predicted CREATE address first (same trick as server/resolver/scripts/base-mainnet-demo.ts),
+  // then deploys and confirms the result actually landed at that exact address.
+  async function handleDeploy() {
+    if (!compiled || !payerAddress || !payeeAddress || !payerAuthorization) return;
+    setDeployError(null);
+    setDeployTxHashes({});
+    try {
+      if (!window.ethereum) throw new Error("No browser wallet found.");
+      const { abi, bytecode } = await getDeploymentArtifact();
+      const walletClient = createWalletClient({ transport: custom(window.ethereum) });
+      const publicClient = createPublicClient({ transport: custom(window.ethereum) });
+
+      const chainIdNum = await publicClient.getChainId();
+      const nonce = await publicClient.getTransactionCount({ address: payerAddress });
+      // +1: the approve tx below consumes the current nonce first, so the deploy lands one after it.
+      const predictedEscrow = getContractAddress({ from: payerAddress, nonce: BigInt(nonce + 1) });
+
+      setDeployStatus("approving");
+      const approveHash = await walletClient.writeContract({
+        address: form.token as Address,
+        abi: ERC20_APPROVE_ABI,
+        functionName: "approve",
+        args: [predictedEscrow, BigInt(form.amount)],
+        account: payerAddress,
+        chain: null,
+      });
+      setDeployTxHashes((h) => ({ ...h, approve: approveHash }));
+      const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      if (approveReceipt.status !== "success") throw new Error(`approve() reverted: ${approveHash}`);
+
+      setDeployStatus("deploying");
+      const deployHash = await walletClient.deployContract({
+        abi,
+        bytecode,
+        args: [
+          payerAddress,
+          payeeAddress,
+          form.token as Address,
+          BigInt(form.amount),
+          deadlineSeconds,
+          BigInt(Number(form.graceHours) * 3600),
+          compiled.questionHash,
+          form.oracleSigner as Address,
+          form.feeRecipient as Address,
+          Number(form.feeBps),
+          BigInt(Number(form.challengeWindowHours) * 3600),
+          "IMD-Attestation",
+          "1",
+          payerAuthorization,
+        ],
+        account: payerAddress,
+        chain: null,
+      });
+      setDeployTxHashes((h) => ({ ...h, deploy: deployHash }));
+      const deployReceipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+      if (deployReceipt.status !== "success") throw new Error(`deployment reverted: ${deployHash}`);
+      if (!deployReceipt.contractAddress) throw new Error(`deploy succeeded but the receipt has no contractAddress: ${deployHash}`);
+      if (deployReceipt.contractAddress.toLowerCase() !== predictedEscrow.toLowerCase()) {
+        throw new Error(`deployed to ${deployReceipt.contractAddress}, predicted ${predictedEscrow} — another transaction from this wallet landed in between`);
+      }
+
+      setDeployedAddress(deployReceipt.contractAddress);
+      setChainId(String(chainIdNum));
+      setDeployStatus("done");
+    } catch (err) {
+      setDeployError(err instanceof Error ? err.message : String(err));
+      setDeployStatus("idle");
     }
   }
 
@@ -271,6 +352,41 @@ export function NewDealForm() {
               2,
             )}
           </pre>
+        </div>
+      )}
+
+      {step === "done" && compiled && deployStatus !== "done" && registerStatus !== "done" && (
+        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Deploy this escrow</h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Sends two real transactions from the payer&apos;s wallet: approving the token spend, then deploying the contract, which pulls the funds in immediately. Your wallet
+            will prompt for both. Gas is paid by the payer.
+          </p>
+          {deployError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">{deployError}</div>}
+          {deployTxHashes.approve && (
+            <p className="break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">approve tx: {deployTxHashes.approve}</p>
+          )}
+          {deployTxHashes.deploy && (
+            <p className="break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">deploy tx: {deployTxHashes.deploy}</p>
+          )}
+          <button
+            disabled={deployStatus !== "idle"}
+            onClick={handleDeploy}
+            className="self-start rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          >
+            {deployStatus === "approving" && "Approving token spend…"}
+            {deployStatus === "deploying" && "Deploying escrow…"}
+            {deployStatus === "idle" && "Deploy with payer's wallet"}
+          </button>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Deployed elsewhere instead? Skip this and paste the address directly into &quot;Register the deployed escrow&quot; below.
+          </p>
+        </div>
+      )}
+
+      {deployStatus === "done" && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+          Deployed to <span className="font-mono text-xs">{deployedAddress}</span> on chain {chainId}. Fill in an RPC URL below and register it.
         </div>
       )}
 

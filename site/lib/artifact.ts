@@ -9,17 +9,33 @@ import type { Abi } from "viem";
 // than process.cwd(), so it doesn't depend on which directory Next.js happens to be invoked from.
 const ARTIFACT_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../contracts/out/MilestoneEscrow.sol/MilestoneEscrow.json");
 
-let cachedAbi: Abi | undefined;
+interface FoundryArtifact {
+  abi: Abi;
+  bytecode: { object: `0x${string}` };
+}
 
-export function loadMilestoneEscrowAbi(): Abi {
-  if (!cachedAbi) {
+let cached: FoundryArtifact | undefined;
+
+function load(): FoundryArtifact {
+  if (!cached) {
     let raw: string;
     try {
       raw = readFileSync(ARTIFACT_PATH, "utf-8");
     } catch (err) {
       throw new Error(`Could not read MilestoneEscrow build artifact at ${ARTIFACT_PATH}. Run \`forge build\` in contracts/ first.`, { cause: err });
     }
-    cachedAbi = JSON.parse(raw).abi as Abi;
+    cached = JSON.parse(raw);
   }
-  return cachedAbi;
+  return cached!;
+}
+
+export function loadMilestoneEscrowAbi(): Abi {
+  return load().abi;
+}
+
+// Only ever needed server-side, to hand to a client that will deploy with its own connected wallet
+// (app/new/actions.ts's getDeploymentArtifact) — this file itself uses node:fs and can't run in the
+// browser.
+export function loadMilestoneEscrowBytecode(): `0x${string}` {
+  return load().bytecode.object;
 }

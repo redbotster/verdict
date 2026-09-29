@@ -79,7 +79,7 @@ original failure and the fix.
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
 | `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; typed-data signing and transaction signing both work through 1Claw's Intents API; 1Claw's own broadcast delivery fails, but a sign-via-1Claw + broadcast-via-RPC alternative works and is proven live (§22) |
 | `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing; can relay through a local account or through 1Claw (`oneClawSignAndBroadcastRelay`), with no private key in the process either way |
-| `site/` | Status page + dual-approval deal creation + registration + resolver webhook | **Deployed for real** on Vercel (URL withheld, see above), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation |
+| `site/` | Status page + dual-approval deal creation + deployment + registration + resolver webhook | **Deployed for real** on Vercel (URL withheld, see above), backed by a real Supabase table; the webhook is live-verified end to end by a real 1Claw Automation; `/new` can now deploy the escrow itself, mechanism proven on local Anvil, not yet a real browser click-through |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 
@@ -101,9 +101,11 @@ Each package has its own README with the real depth. This one's just for "does i
   reduce it (pick questions with one unambiguous source URL), not eliminate it.
 - No paid human audit. The Base mainnet demo was one wallet playing every role — proof the contract
   works, not clearance to use it for a real deal.
-- `/new` still doesn't deploy anything itself — it produces a signed deployment payload, and a
-  separate "register the deployed escrow" step (real, live-verified, §21) writes it to Supabase once
-  you've actually deployed it elsewhere with that payload.
+- `/new` can now deploy the escrow itself (the payer's wallet approves + deploys), but only the
+  underlying mechanism is proven so far — against a local Anvil chain with the identical code path
+  (`site/scripts/deploy-self-service-test.ts`), not yet a real click-through with an actual wallet
+  extension in a real browser against a real chain. Deploying elsewhere and pasting the address into
+  the "register the deployed escrow" step (real, live-verified, §21) still works as before.
 
 ## Ops wallet
 
@@ -155,3 +157,4 @@ order it was found:
 | 20 | 1Claw's Intents API actually works — no dashboard-only gate, no tier gate; the real fix was a fresh agent token, plus three real signing bugs found and fixed |
 | 21 | Real deal storage via Supabase, replacing the hardcoded placeholder |
 | 22 | On-chain transaction *signing* via 1Claw works; 1Claw's own *broadcast* fails — confirmed on Base mainnet, no funds lost — but signing via 1Claw + broadcasting via a plain RPC works, proven live on Base mainnet |
+| 23 | `/new` can now actually deploy the escrow (payer approves + deploys); mechanism proven on local Anvil, not yet a real browser click-through |

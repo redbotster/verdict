@@ -5,11 +5,12 @@
 // directly, so there's nothing to extract — it calls the template builder and lint checks that sit
 // downstream of extraction, plus a real (free) IMD quote, the same way compileDeal() would.
 import { randomUUID } from "node:crypto";
-import { isAddress } from "viem";
+import { isAddress, type Abi } from "viem";
 import { ImdClient, generateClientToken, ImdApiError } from "@verdict/imd-client";
 import { releasePublishedTemplate, lintDealText, lintSourceUrls } from "@verdict/oracle-compiler";
 import type { Extraction, OracleRequestInput } from "@verdict/oracle-compiler";
 import { readEscrowOnChainState } from "@/lib/escrow";
+import { loadMilestoneEscrowAbi, loadMilestoneEscrowBytecode } from "@/lib/artifact";
 import { createDeal } from "@/lib/deals";
 
 export interface CompileFormInput {
@@ -67,6 +68,19 @@ export async function compileReleaseDeal(form: CompileFormInput): Promise<Compil
     if (err instanceof ImdApiError) return { ok: false, error: `IMD rejected this: ${err.body.detail ?? err.body.error}` };
     return { ok: false, error: `Could not reach IMD: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+export interface DeploymentArtifact {
+  abi: Abi;
+  bytecode: `0x${string}`;
+}
+
+// The browser deploys the contract itself (it needs the payer's connected wallet to pay gas and sign
+// the deploy transaction — a Server Action can't do that), but the ABI/bytecode still have to come
+// from the real Foundry build artifact on this server, not be hand-duplicated into client code where
+// they could drift from what `forge build` actually produced.
+export async function getDeploymentArtifact(): Promise<DeploymentArtifact> {
+  return { abi: loadMilestoneEscrowAbi(), bytecode: loadMilestoneEscrowBytecode() };
 }
 
 export interface RegisterDealInput {

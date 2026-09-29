@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "deploy-demo": "node scripts/deploy-demo.ts",
+    "deploy-self-service-test": "node scripts/deploy-self-service-test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

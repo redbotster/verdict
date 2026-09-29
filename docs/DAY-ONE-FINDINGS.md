@@ -950,6 +950,40 @@ resolver's on-chain writes is now genuinely possible, not just signable; `EVM_PR
 required only for the ops-wallet-driven demo scripts (`base-mainnet-demo.ts`, etc.), not for a real
 resolver's core writes.
 
+## 23. `/new` can now actually deploy the escrow — proven on the underlying mechanism, not the UI itself
+
+`/new` produced a signed deployment payload but never deployed anything (README's own "What this
+doesn't do" said so). The constructor pulls `amount` from the payer via `transferFrom` immediately, so
+the payer has to approve the escrow address for that amount *before* it's deployed — but the address
+doesn't exist yet. The fix is the same nonce-prediction trick `scripts/base-mainnet-demo.ts` and
+`site/scripts/deploy-demo.ts` already used for a separate deployer account: read the payer's current
+nonce, predict the CREATE address one nonce ahead (`viem`'s `getContractAddress`), approve that address
+for the token spend, then deploy — the contract lands exactly where predicted, or the whole thing
+throws rather than silently deploying somewhere the approval doesn't cover.
+
+**What's new here**: the payer is both the approver *and* the deployer (one wallet, two sequential
+transactions with a nonce dependency between them), not a separate deployer account approving on the
+payer's behalf like the existing demo scripts. `site/lib/artifact.ts` gained
+`loadMilestoneEscrowBytecode()` alongside its existing ABI loader (same real Foundry artifact, never
+hand-duplicated), and `app/new/actions.ts` gained a `getDeploymentArtifact()` Server Action so the
+browser can fetch the real ABI/bytecode without a private key or RPC access on the server needing to
+do the deploy itself — the deploy has to happen client-side, since only the browser holds the payer's
+wallet.
+
+**Proven for real, at zero cost, on local Anvil** (`site/scripts/deploy-self-service-test.ts`): the
+exact same sequence `NewDealForm.tsx`'s `handleDeploy()` runs — read nonce, predict address, approve,
+deploy with the real ABI/bytecode via `lib/artifact.ts`'s loaders — landed the contract exactly at the
+predicted address, and the deployed contract's own on-chain `payer`/`amount`/`questionHash` and the
+escrow's real token balance all matched what was sent. This confirms the mechanism (the viem calls,
+the nonce math, the constructor's expectations) is correct.
+
+**What this does not prove**: a real click-through in an actual browser with a real wallet extension
+(MetaMask, etc.) against a real chain. `createWalletClient({ transport: custom(window.ethereum) })`
+makes the same JSON-RPC calls either way, but a real wallet's UI flow (two sequential approval popups,
+a user who might reject or delay between them, real gas estimation) hasn't been exercised — that
+needs an actual manual run before trusting this for a real deal between real counterparties, same
+caveat as every other real-money action in this project.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
