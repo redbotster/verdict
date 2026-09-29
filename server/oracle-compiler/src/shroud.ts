@@ -13,12 +13,18 @@ import type { LanguageModel } from "ai";
 // contract. @ai-sdk/anthropic's createAnthropic({baseURL, headers}) is verified against its
 // installed type definitions (node_modules/@ai-sdk/anthropic), not memory.
 //
-// NOT live-run: doing so needs either a stored provider key at providers/anthropic/api-key in a
-// vault the agent can read, a funded 1Claw "LLM Token Billing" org setting, or the x402/card-funded
-// router-key rail — none configured in this pass (same "no real LLM credentials available" gap as
-// the default Vercel Gateway path; see oracle-compiler's own README). test/shroud.test.ts proves the
-// request actually reaches the right URL with the right headers, using a fake fetch — not a live
-// call.
+// Live-verified 2026-09-29 against a real 1Claw org with LLM Token Billing already active (Stripe
+// AI Gateway) — no provider key anywhere in this project, billed straight to the 1Claw org. See
+// docs/DAY-ONE-FINDINGS.md §17 and scripts/real-extraction-smoke.ts. test/shroud.test.ts covers the
+// URL/header plumbing with a fake fetch; that script is the real, paid, live proof.
+//
+// Real gotcha found in the process: routed through LLM Token Billing, Shroud's real backend is
+// Google Vertex AI's Anthropic partner models, and this org's Vertex project has a policy
+// (constraints/vertexai.allowedPartnerModelFeatures) that hard-400s native structured-output mode
+// for every Anthropic model — not model-specific, confirmed across claude-sonnet-4-6 and
+// claude-haiku-4-5. That's why extract.ts uses tool-calling instead of Output.object()/
+// generateObject() — a different request shape, not subject to that same policy, and verified to
+// work through this exact path. Worth flagging to 1Claw if you have a support channel with them.
 export interface ShroudModelOptions {
   agentId: string;
   agentApiKey: string;

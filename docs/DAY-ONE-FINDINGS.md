@@ -551,6 +551,77 @@ chain-typing cast already used in `base-mainnet-demo.ts`; fixed the same way —
 Parameters<typeof resolveDeal>[1]["publicClient"]` (and `"walletClient"`) at the call site in
 `route.ts`, rather than re-importing a duplicate viem type.
 
+## 17. Real LLM extraction, finally — via 1Claw Shroud + LLM Token Billing, with two real bugs found and fixed along the way
+
+Extraction (`extractDealFields`) had never been run against a real model in this project's life —
+every prior pass used injected test fixtures, for lack of any LLM credential (`docs.1claw.co`'s own
+Shroud page: "no `AI_GATEWAY_API_KEY` either"). Checked this org's 1Claw account directly rather than
+assume, and found LLM Token Billing (`docs.1claw.co/docs/guides/billing-and-usage#llm-token-billing-optional-add-on`)
+was **already enabled and active** — a Stripe AI Gateway subscription billing token usage straight to
+the org, no Anthropic key needed anywhere. Created a dedicated Shroud-enabled agent
+(`scripts/setup-shroud-agent.ts`, its own vault, locked to `anthropic` + `claude-sonnet-4-6` only,
+`daily_budget_usd: 2` as a safety cap) and ran real extraction for the first time.
+
+**Bug 1 — native structured outputs are blocked for every Anthropic model under LLM Token
+Billing.** The first real call, using `extractDealFields`'s original `Output.object()`-based
+implementation, failed with a real `400` — not from IMD, from **Google Vertex AI**, several layers
+downstream of Shroud:
+
+```
+Organization Policy constraint constraints/vertexai.allowedPartnerModelFeatures violated for
+`projects/1082558917959` attempting to use a disallowed feature structured_outputs for Partner
+model claude-sonnet-4-6.
+```
+
+LLM Token Billing routes Anthropic calls through Stripe AI Gateway to Google Vertex AI's Anthropic
+"partner models," and this org's underlying Vertex project has an org policy that blocks the
+`structured_outputs` feature outright. Confirmed this isn't model-specific — `claude-haiku-4-5` hit
+the identical error — so it's a blanket restriction on this billing path, not something a different
+model choice works around. The AI SDK's `Output.object()`/`generateObject()` don't expose a way to
+request a different structured-output strategy in this version (no `mode` option; both always use
+the provider's native json_schema mode for Anthropic). **Fix**: rewrote `extractDealFields` to use
+tool-calling instead — `generateText` with a single tool and `toolChoice: { type: "tool", toolName:
+"record_extraction" }` — a different request shape (`tools`/`tool_choice`, not
+`output_config.format`) that isn't subject to the same Vertex policy. Verified live against both
+`claude-sonnet-4-6` and `claude-haiku-4-5`. This also works unchanged against the default direct
+Gateway path, so there's no need for two extraction code paths. Worth flagging to 1Claw if there's a
+support channel — LLM Token Billing presumably isn't meant to silently break a standard AI SDK
+feature for every model of a supported provider.
+
+**Bug 2 — the model has no idea what today's date is.** With the structured-outputs issue fixed,
+the very first real extraction (deal text: "...within the next 7 days") silently produced
+`deadlineIso: "2025-06-05T15:41:29Z"` — a date over a year in the *past* relative to the real
+current date (2026-09-29). The extraction prompt never told the model what "now" actually is, so it
+computed the relative deadline against some date near its training cutoff instead. This fed a
+nonsensical (negative-length) window straight into IMD's dry-run quote, which — concerning in its
+own right — didn't reject it, just silently clamped it to `window.hours: 1`. **Fix**: the prompt now
+opens with `The current date and time is ${new Date().toISOString()} (UTC). Resolve any relative
+deadline against this, not your training cutoff.` Re-ran the same deal text after the fix:
+`deadlineIso` came back correctly as 7 real days out. This is a real, generalizable extraction
+correctness bug, not a Shroud-specific quirk — it would misfire identically on the default Gateway
+path with any relative deadline phrase, and nothing downstream (lint, template building, the dry-run
+quote) would have caught a deadline that's merely *wrong*, only one that's missing or malformed.
+
+**Bug 3 (smaller, found while proving the fix above) — IMD's dry-run quote caps the panel window at
+720 hours (30 days), undocumented.** Bisected precisely: a deal compiling to `window.hours: 720`
+quotes fine; `721` and up fail with a bare `400 invalid_request`, no detail, same opaque shape as
+the Bug 1 error before Vertex's message was inspected. A deal whose real extracted deadline is
+further out than ~29 days (the template adds a fixed buffer to the raw window) will fail to compile
+with no actionable error message pointing at the real cause. Not fixed in code — genuinely IMD's own
+constraint, not a bug in this project — but worth knowing before picking a demo deal's deadline, and
+worth asking IMD about directly (is 30 days a hard product limit, or tunable per request?).
+
+End-to-end proof, real throughout except the escrow itself: `scripts/real-extraction-smoke.ts` runs
+`compileDeal()` with the real Shroud-backed `claude-sonnet-4-6` model against "octocat/Hello-World
+must publish a non-prerelease GitHub release within the next 7 days," and gets back a real,
+successful IMD quote with a real `questionHash` — the first time this project's full compiler
+pipeline has run with a real model instead of an injected fixture.
+
+**Operational note**: `PATCH /v1/agents/:id`'s `shroud_config` replaces the object wholesale, not a
+deep merge — patching just `{ allowed_models: [...] }` silently reset `daily_budget_usd` and
+`pii_policy` back to `null` on a prior call in this session. Always resend the full desired
+`shroud_config` on every patch.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

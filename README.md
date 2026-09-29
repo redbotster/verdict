@@ -32,13 +32,20 @@ mainnet with real USDC:
 Full details in `docs/DAY-ONE-FINDINGS.md` §13–15, including a real oracle-panel disagreement worth
 reading before you rely on any of this for an actual deal.
 
+Extraction now runs against a real model too — `claude-sonnet-4-6` via 1Claw's Shroud, billed
+through this org's own 1Claw LLM Token Billing subscription, no Anthropic key anywhere in this
+project. Getting there surfaced and fixed two real bugs: a Google Vertex org-policy block on native
+structured outputs for every Anthropic model under that billing path (worked around with
+tool-calling), and the model silently computing relative deadlines ("within 7 days") against the
+wrong date because it was never told what today actually is. See §17.
+
 ## Layout
 
 | Package | What it does | Status |
 |---|---|---|
 | `contracts/` | `MilestoneEscrow.sol`, the on-chain escrow | 56/56 tests, audited, live on Base mainnet (demo) |
 | `server/imd-client/` | IMD's paid-request client, all 8 steps | All real, including payment signing |
-| `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates live-verified; extraction untested (no LLM key) |
+| `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates and extraction live-verified end to end, real model included |
 | `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; the typed-data signer adapter is code-complete but unverified (needs a dashboard toggle — see below) |
 | `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing |
 | `site/` | Status page + dual-approval deal creation + resolver webhook | Pages checked in a real browser; the new webhook route's auth/validation checked against a local dev server |
@@ -47,8 +54,6 @@ Each package has its own README with the real depth. This one's just for "does i
 
 ## What's not done
 
-- Extraction has never hit a real LLM. No Vercel AI Gateway key, no funded 1Claw Shroud path either.
-  Everything downstream of it runs on injected test fixtures.
 - 1Claw's Intents API needs a dashboard toggle flipped per agent before it'll actually sign — no API
   call can do that part. `server/oneclaw-client`'s typed-data signer (a drop-in replacement for the
   raw private key below) is written and tested against a fake client, but can't be live-verified
@@ -109,3 +114,4 @@ order it was found:
 | 14 | The schema works — a real paid `oracle.request` got admitted |
 | 15 | A real panel can disagree even when everyone gives the same answer — read before relying on this |
 | 16 | Fixed the resolver's oracle-polling timing bug, added a 1Claw-backed signer, built the missing webhook |
+| 17 | Real LLM extraction via 1Claw Shroud — a Vertex structured-outputs block, a wrong-date bug, and IMD's undocumented 30-day window cap |

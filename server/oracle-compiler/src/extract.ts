@@ -1,4 +1,4 @@
-import { generateText, Output } from "ai";
+import { generateText, tool } from "ai";
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 import type { Extraction } from "./types.ts";
@@ -41,8 +41,24 @@ export interface ExtractOptions {
 
 export type ExtractFn = (dealText: string, opts?: ExtractOptions) => Promise<Extraction>;
 
+// Uses tool-calling (generateText + a single forced tool), not Output.object()/generateObject()'s
+// native structured-output mode. Confirmed necessary, not just a preference: routed through 1Claw's
+// Shroud with LLM Token Billing (Stripe AI Gateway -> Google Vertex AI Partner Models), native
+// structured outputs get a hard 400 from Vertex's own org policy
+// (constraints/vertexai.allowedPartnerModelFeatures disallows `structured_outputs` for every
+// Anthropic partner model on 1Claw's Stripe project) — confirmed across claude-sonnet-4-6 and
+// claude-haiku-4-5 alike, so it's a blanket restriction, not a model-specific one. Tool-calling is a
+// different request shape (`tools` + `tool_choice`, not `output_config.format`) and is not subject
+// to that same policy; verified live against the same agent and models. See
+// docs/DAY-ONE-FINDINGS.md for the write-up. This also works unchanged against the default direct
+// Gateway path, so there's no need for two code paths.
 export const extractDealFields: ExtractFn = async (dealText, opts = {}) => {
   const prompt = [
+    `The current date and time is ${new Date().toISOString()} (UTC). Resolve any relative deadline`,
+    "(e.g. 'within 7 days', 'by next Friday') against this, not your training cutoff — confirmed by",
+    "a real run that silently produced a deadline over a year in the past for 'within the next 7",
+    "days' before this line was added; see docs/DAY-ONE-FINDINGS.md.",
+    "",
     "Extract structured fields from this escrow deal description. Be literal — do not soften or",
     "interpret subjective language, report it verbatim in ambiguousTerms instead. If a required field",
     "for the matched kind is missing, use kind 'unsupported' rather than guessing.",
@@ -53,11 +69,19 @@ export const extractDealFields: ExtractFn = async (dealText, opts = {}) => {
     .filter(Boolean)
     .join("\n");
 
-  const { output } = await generateText({
+  const { toolCalls } = await generateText({
     model: opts.model ?? DEFAULT_MODEL,
-    output: Output.object({ schema: ExtractionSchema }),
     prompt,
+    tools: {
+      record_extraction: tool({
+        description: "Record the structured fields extracted from the deal text.",
+        inputSchema: ExtractionSchema,
+      }),
+    },
+    toolChoice: { type: "tool", toolName: "record_extraction" },
   });
 
-  return output;
+  const call = toolCalls.find((c) => c.toolName === "record_extraction");
+  if (!call) throw new Error("model did not call record_extraction");
+  return ExtractionSchema.parse(call.input);
 };

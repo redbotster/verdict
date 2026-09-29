@@ -57,16 +57,20 @@ and PII detection on that text before the model ever sees it; a direct Gateway c
 ```ts
 import { extractDealFields, shroudAnthropicModel } from "@verdict/oracle-compiler";
 
-const model = shroudAnthropicModel({ agentId, agentApiKey, model: "claude-haiku-4-5" });
+const model = shroudAnthropicModel({ agentId, agentApiKey, model: "claude-sonnet-4-6" });
 const extraction = await extractDealFields(dealText, { model });
 ```
 
-**Not live-run**: `test/shroud.test.ts` proves the request reaches `shroud.1claw.co/v1/messages`
-with the exact required headers (`X-Shroud-Agent-Key`, `X-Shroud-Provider`) using a fake `fetch` —
-real, verified plumbing, not a real extraction. Actually running it needs either a provider key
-stored at `providers/anthropic/api-key` in a vault the agent can read, a funded 1Claw "LLM Token
-Billing" setting, or the x402/card-funded router-key rail — none configured in this pass. This is
-the same underlying gap as the default Gateway path (no `AI_GATEWAY_API_KEY` either), not a new one.
+**Live-verified 2026-09-29**: this project's 1Claw org already has LLM Token Billing active (Stripe
+AI Gateway), so a dedicated Shroud-enabled agent (`scripts/setup-shroud-agent.ts`) gets real
+extraction with no Anthropic key anywhere in this project — billed straight to the 1Claw org, capped
+at `daily_budget_usd: 2` and locked to `claude-sonnet-4-6` on that agent's `shroud_config`. Proven
+end to end with `scripts/real-extraction-smoke.ts`: real extraction into a real free IMD dry-run
+quote, real `questionHash` back. See `docs/DAY-ONE-FINDINGS.md` §17 for the two real bugs this
+surfaced (both fixed): a Vertex org-policy block on native structured outputs for every Anthropic
+model under LLM Token Billing (worked around with tool-calling instead of `Output.object()`), and
+the model having no notion of the current date, which silently produced a deadline over a year in
+the past for a relative phrase like "within 7 days" until the prompt was given today's real date.
 
 ## Status
 
@@ -78,10 +82,17 @@ the same underlying gap as the default Gateway path (no `AI_GATEWAY_API_KEY` eit
   a known-working body field by field until isolating it. The working shape is `guards.sources` +
   `minSources`, same as the panel-evidence templates, with `toleranceBps` omitted entirely. See
   `src/templates/onchainEvent.ts` and `docs/DAY-ONE-FINDINGS.md` §6.
-- Extraction (`extractDealFields`) has not been run against a real model in this pass — no
-  `AI_GATEWAY_API_KEY` was available. Everything downstream of extraction (lint, template
-  matching/building, dry-run) is unit-tested and separately live-smoke-tested by injecting a fixed
-  extraction directly, bypassing the LLM call.
+- Extraction (`extractDealFields`) is now **live-verified** against a real model (`claude-sonnet-4-6`
+  via 1Claw's Shroud) — see the Model choice section above and `docs/DAY-ONE-FINDINGS.md` §17. The
+  default Vercel Gateway path (`DEFAULT_MODEL`) is still untested live — no `AI_GATEWAY_API_KEY`
+  configured — but the extraction code itself is now proven, not just typechecked, and
+  `test/extract.test.ts` covers the tool-calling logic against a fake model. Everything downstream
+  of extraction (lint, template matching/building, dry-run) is also unit-tested and separately
+  live-smoke-tested.
+- IMD's real dry-run quote endpoint caps the panel question's time window at **720 hours (30
+  days)** — confirmed by bisection, undocumented anywhere, and it fails with a bare `400
+  invalid_request` and no detail past that. A deal whose extracted deadline is further out than
+  ~29 days from now will fail to compile. See `docs/DAY-ONE-FINDINGS.md` §17.
 - Built elsewhere: `site/app/new` implements the dual-approval UI, and `server/resolver` is the agent
   that calls this compiler's output at a deal's deadline.
 
