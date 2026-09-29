@@ -13,6 +13,8 @@
   "dependencies": {
     "@verdict/imd-client": "file:../server/imd-client",
     "@verdict/oracle-compiler": "file:../server/oracle-compiler",
+    "@verdict/oneclaw-client": "file:../server/oneclaw-client",
+    "@verdict/resolver": "file:../server/resolver",
     "next": "16.3.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",

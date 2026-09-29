@@ -13,6 +13,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
     "live-smoke": "node scripts/live-smoke.ts"
   }
 }

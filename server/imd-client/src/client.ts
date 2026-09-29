@@ -9,7 +9,7 @@ import type {
 } from "./types.ts";
 import { ImdApiError } from "./types.ts";
 
-const BASE_URL = "https://api.imd.fun";
+export const BASE_URL = "https://api.imd.fun";
 
 async function parseJsonOrThrow<T>(res: Response): Promise<T> {
   const body = await res.json();

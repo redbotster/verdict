@@ -6,7 +6,16 @@ export { needsApproval, NOT_IMPLEMENTED_APPROVAL_GATE, ApprovalNotWiredError } f
 export type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "./approval.ts";
 export { NOT_IMPLEMENTED_PAYMENT_SIGNER, PaymentSigningNotWiredError, imdPaymentSigner } from "./paymentSigner.ts";
 export type { PaymentSigner, PaymentSignature, TypedDataSigner } from "./paymentSigner.ts";
-export { fetchOracleAttestation, UnconfirmedOracleResultShapeError } from "./oracleResult.ts";
+export {
+  fetchOracleAttestation,
+  getOracleStatus,
+  pollOracleUntilResolved,
+  parseSignedAttestation,
+  UnconfirmedOracleResultShapeError,
+  OracleDisagreedError,
+  OracleStillAssessingError,
+} from "./oracleResult.ts";
+export type { OracleRequestStatus } from "./oracleResult.ts";
 export { attestationDomain, ATTESTATION_TYPES } from "./eip712.ts";
 export { loadMilestoneEscrowArtifact } from "./artifact.ts";
 export { loadOrCreateImdToken, loadGithubPublishToken } from "./vaultSecrets.ts";

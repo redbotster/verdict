@@ -39,9 +39,9 @@ reading before you rely on any of this for an actual deal.
 | `contracts/` | `MilestoneEscrow.sol`, the on-chain escrow | 56/56 tests, audited, live on Base mainnet (demo) |
 | `server/imd-client/` | IMD's paid-request client, all 8 steps | All real, including payment signing |
 | `server/oracle-compiler/` | English deal → binding IMD question | All 3 templates live-verified; extraction untested (no LLM key) |
-| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end |
-| `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet |
-| `site/` | Status page + dual-approval deal creation | Checked in a real browser |
+| `server/oneclaw-client/` | 1Claw's Vaults/Agents/Automations/Intents client | Live-verified end to end; the typed-data signer adapter is code-complete but unverified (needs a dashboard toggle — see below) |
+| `server/resolver/` | Fires at a deal's deadline, relays, settles | Live-verified on Anvil and on Base mainnet; now actually waits out real panel-assessment time instead of guessing |
+| `site/` | Status page + dual-approval deal creation + resolver webhook | Pages checked in a real browser; the new webhook route's auth/validation checked against a local dev server |
 
 Each package has its own README with the real depth. This one's just for "does it work, and where."
 
@@ -50,7 +50,13 @@ Each package has its own README with the real depth. This one's just for "does i
 - Extraction has never hit a real LLM. No Vercel AI Gateway key, no funded 1Claw Shroud path either.
   Everything downstream of it runs on injected test fixtures.
 - 1Claw's Intents API needs a dashboard toggle flipped per agent before it'll actually sign — no API
-  call can do that part.
+  call can do that part. `server/oneclaw-client`'s typed-data signer (a drop-in replacement for the
+  raw private key below) is written and tested against a fake client, but can't be live-verified
+  until that toggle is flipped.
+- The resolver still runs on a raw `EVM_PRIVATE_KEY` in an env var, not a vault-held key.
+- The webhook a 1Claw Automation calls at a deal's deadline (`site/app/api/resolve/[address]`) exists
+  now and its request handling is verified, but it's never been hit by a real Automation or driven
+  through a real paid IMD call end to end — only up to the point where that would cost money.
 - Never seen a *successful* oracle attestation. The one real paid request we ran disagreed instead —
   every panelist gave the same right answer, but the agreement logic clusters by the exact source URL
   they cited, and it didn't cluster them. No attestation gets signed either way when that happens,
@@ -102,3 +108,4 @@ order it was found:
 | 13 | IMD's real payment-signing schema, pulled from its own shipped frontend |
 | 14 | The schema works — a real paid `oracle.request` got admitted |
 | 15 | A real panel can disagree even when everyone gives the same answer — read before relying on this |
+| 16 | Fixed the resolver's oracle-polling timing bug, added a 1Claw-backed signer, built the missing webhook |

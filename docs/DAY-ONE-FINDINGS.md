@@ -507,6 +507,50 @@ being explicit with users that "no attestation ever arrives" is a real possible 
 filled in) — this specific real request never reached that state. A future real paid request that
 achieves quorum would be needed to observe it.
 
+## 16. Fixed a real resolver timing bug, added a 1Claw-backed signer, and closed the missing-webhook gap
+
+Three follow-ups from §15, all shipped in the same pass:
+
+**The resolver never actually waited for the oracle panel.** `oracleResult.ts` previously guessed at
+the result shape and fetched it once, immediately after payment admission. But §14/§15 showed panel
+assessment genuinely takes minutes of wall-clock time, and can end in `"disagreed"` with no
+attestation ever signed. Rewrote `oracleResult.ts` against the real confirmed shape from §14/§15:
+`pollOracleUntilResolved()` polls on an interval until `attestation`/`signature`/`signer` are all
+non-null, throws a distinct `OracleDisagreedError` immediately on `"disagreed"` (so it's a typed,
+catchable failure mode, not a hang or a misreported parse error), and throws
+`OracleStillAssessingError` on timeout. `resolve.ts`'s `defaultGetAttestation` now calls this instead
+of fetching once. 9 new tests against canned "assessing"/"disagreed"/"resolved" responses (the
+disagreed fixture uses the exact real failure text from §15); resolver's suite is 37/37.
+
+**A 1Claw-backed signer, to close the raw-private-key-in-a-file gap.** `oneclaw-client/src/typedDataSigner.ts`
+adds `oneClawTypedDataSigner()`, wrapping 1Claw's `POST /v1/agents/:id/sign` (an `intent_type:
+"typed_data"` call) behind the same minimal `{ address, signTypedData }` shape `imdPaymentSigner`
+already expects — so a 1Claw-held key can substitute for a raw viem account anywhere in the codebase
+with no other code changes. Not live-verified: still blocked on 1Claw's Intents API dashboard toggle
+(§10), which no API call can flip. Code-complete, typechecked, 4 passing tests against a fake client.
+
+**Built the missing Automations webhook.** `site/app/api/resolve/[address]/route.ts` is the endpoint
+a 1Claw Automation (`scheduleResolutionAutomation`'s `wait_until` + `http` workflow) actually calls at
+a deal's deadline — until now nothing existed for it to call. The project has no real database yet
+(`site/lib/deals.ts` is an explicit placeholder that doesn't carry the fields `resolveDeal()` needs),
+so the route is deliberately stateless: everything travels in the automation's callback body, set
+once when the automation is scheduled. Guarded by a shared-secret header (`X-Resolver-Secret` vs.
+`RESOLVER_WEBHOOK_SECRET`) rather than left open. Verified: `next build` passes (see below for the
+cross-package viem typing fix that took), and all HTTP-layer behavior — missing/wrong secret →
+401, invalid JSON → 400, missing fields → 400, missing signer → 500 — checked against a real local
+`next dev` server. Not exercised past that point: doing so would require a real paid IMD call, which
+this pass didn't spend money on again since §13-15 already proved the underlying `resolveDeal` path
+for real, and this route only thinly wraps it.
+
+**Cross-package viem typing gotcha.** `site` and `server/resolver` each install their own separate
+copy of viem (same version, 2.56.9 — this project uses `file:` deps, not npm workspaces, so nothing
+hoists or shares the install). TypeScript treats the two copies as nominally distinct types even
+though they're structurally identical at runtime, so passing a `site`-constructed `PublicClient`/
+`WalletClient` into `resolveDeal()` failed to typecheck. Same root-cause class as the OP-stack
+chain-typing cast already used in `base-mainnet-demo.ts`; fixed the same way — `as unknown as
+Parameters<typeof resolveDeal>[1]["publicClient"]` (and `"walletClient"`) at the call site in
+`route.ts`, rather than re-importing a duplicate viem type.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration

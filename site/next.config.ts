@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   // before externalization is even considered — but it's still correct to keep: these packages use
   // Node-specific APIs (node:crypto, node:fs) and don't need to be bundled at all, only resolved at
   // runtime via native `require`/`import`.
-  serverExternalPackages: ["@verdict/imd-client", "@verdict/oracle-compiler"],
+  serverExternalPackages: ["@verdict/imd-client", "@verdict/oracle-compiler", "@verdict/oneclaw-client", "@verdict/resolver"],
 };
 
 export default nextConfig;

@@ -11,11 +11,14 @@ import type { EscrowRef, SignedAttestation } from "./types.ts";
 
 export type GetAttestationFn = (input: OracleRequestInput, imdToken: string) => Promise<SignedAttestation>;
 
-// The real (but partially unconfirmed) end-to-end IMD flow: quote -> challenge -> sign -> pay -> poll
-// -> fetch. Steps 1/3/6/7 (quote, challenge, pay-call, poll) are confirmed against the live API
-// (docs/DAY-ONE-FINDINGS.md). Steps 2 and 8 (the payment signature itself, and parsing the eventual
-// oracle result) are not — see paymentSigner.ts and oracleResult.ts for exactly what's unconfirmed.
-export function defaultGetAttestation(paymentSigner: PaymentSigner): GetAttestationFn {
+// The real end-to-end IMD flow: quote -> challenge -> sign -> pay -> poll payment -> poll oracle ->
+// fetch. Every step through "poll payment" is confirmed live, including real payment signing (see
+// docs/DAY-ONE-FINDINGS.md §13-14). The last step is a genuinely separate wait from payment
+// admission: panel assessment takes real wall-clock time (a real run took ~2 minutes even for a
+// trivial question) and can end in "disagreed" with no attestation ever signed — see
+// oracleResult.ts and §15 for that failure mode, which this function surfaces as
+// OracleDisagreedError rather than hanging or misreporting it as a parse failure.
+export function defaultGetAttestation(paymentSigner: PaymentSigner, oracleWait?: { intervalMs?: number; timeoutMs?: number; fetchImpl?: typeof fetch }): GetAttestationFn {
   return async (input, imdToken) => {
     const client = new ImdClient(imdToken);
     const { order } = await client.quote("oracle.request", input, randomUUID());
@@ -24,7 +27,9 @@ export function defaultGetAttestation(paymentSigner: PaymentSigner): GetAttestat
     await client.pay(order.id, paymentSignatureB64, quoteSignature);
     const status = await client.pollUntilAdmitted(order.id);
     if (status.status !== "admitted") throw new Error(`oracle.request did not reach admitted (got ${status.status})`);
-    return fetchOracleAttestation(status, imdToken);
+    const admissionResult = (status.admission as Record<string, unknown> | null)?.["result"] as Record<string, unknown> | undefined;
+    if (!admissionResult) throw new Error(`admitted status has no admission.result to find the oracle request at: ${JSON.stringify(status.admission)}`);
+    return fetchOracleAttestation(admissionResult, oracleWait);
   };
 }
 
