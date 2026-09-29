@@ -60,6 +60,11 @@ jobs:
         with:
           name: contracts-out
           path: contracts/out
+      # resolve.ts itself only needs type-only imports from oracle-compiler, but
+      # scripts/e2e-demo.ts (also in this package's tsconfig `include`) imports compile.ts, which
+      # pulls in extract.ts's `ai`/`zod` deps — so typecheck needs oracle-compiler's node_modules too.
+      - run: npm install
+        working-directory: server/oracle-compiler
       - run: npm install
         working-directory: server/resolver
       - run: npm run typecheck
