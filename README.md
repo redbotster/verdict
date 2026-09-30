@@ -13,7 +13,7 @@ not what's assumed. Audit: [audits/2026-09-28/AUDIT-REPORT.md](audits/2026-09-28
 High + 3 Medium + 5 Low + 1 Info, all fixed. Still not a substitute for a paid human audit before
 anything real.
 
-## Two critical findings: the signature scheme is now fixed (§25); a deeper, separate bug still blocks real settlement (§27)
+## First real, complete, end-to-end settlement (§25 + §27, both now fixed and proven)
 
 **§25, fixed**: `MilestoneEscrow.sol`'s on-chain check of IMD's oracle signature used the wrong
 EIP-712 domain name and struct shape — a bug affecting every escrow ever deployed under the contract,
@@ -25,20 +25,22 @@ test recovers a real captured signature to IMD's real reported signer through th
 hashing code; all 56 contract tests and 50 resolver tests pass with the corrected schema; a real local
 demo re-ran end to end.
 
-**§27, found while attempting the final live proof, NOT fixed**: even with §25's fix, a real deal
-still can't settle. Both oracle-compiler templates build a *relative* evidence window
+**§27, found while attempting the final live proof, now fixed**: even with §25's fix, a real deal
+still couldn't settle. Both oracle-compiler templates build a *relative* evidence window
 (`window: {hours: N}`), and IMD re-pins that to exact blocks **at the moment of each quote** (confirmed,
 for free — quoting the identical input twice, 90 seconds apart, produced two different
 `questionHash` values). Since a real deal is compiled once and resolved later — its whole point — the
-resolution-time `questionHash` can never match the one baked into the contract at deploy time, for any
-realistic gap. Attempted the actual end-to-end proof for real on Ethereum mainnet (a fresh escrow,
-`0xa675c7fe...b39987`, real `$IMD` as the escrowed token, a real `resolveDeal()` call, a real paid
-oracle.request) — `resolveDeal()` correctly refused the mismatched real attestation before ever
-touching the contract, so no funds were at risk (the real `$IMD` was cleanly reclaimed once the demo's
-short deadline elapsed). The fix needs oracle-compiler to pin an *absolute* `{fromBlock, toBlock}`
-window at compile time instead — a real design change (needs a real chain read at compile time, which
-oracle-compiler has never done), reported rather than started unilaterally. Full details:
-`docs/DAY-ONE-FINDINGS.md` §25 and §27.
+resolution-time `questionHash` could never match the one baked into the contract at deploy time, for any
+realistic gap. Fixed in `compileDeal()`: after the normal free quote, it re-quotes once more with an
+**absolute** `{fromBlock, toBlock}` window substituted in from the first quote's own resolved `pinned`
+range — an absolute range isn't re-pinned, so the returned `questionHash` is stable no matter how much
+real time passes before resolution. Verified for free first (a real ~100s gap, identical hash both
+times), then proven completely for real (2026-09-30): a fresh escrow on Ethereum mainnet,
+[`0x892aba33...08aa351`](https://etherscan.io/address/0x892aba33239d8f274eeb05176e27cc7dc08aa351), a
+real paid `oracle.request`, a real attestation whose `questionHash` matched the compile-time one
+exactly, a real on-chain `release()`, a real `withdraw()`. Final state: `Released`, `owed: 0`. **This is
+the first deal this project has ever resolved end to end, entirely for real, with no manual
+intervention and no funds at risk at any point.** Full details: `docs/DAY-ONE-FINDINGS.md` §25 and §27.
 
 ## What actually works
 
@@ -118,13 +120,12 @@ Each package has its own README with the real depth. This one's just for "does i
   all~~ — **fixed and independently proven, see §25's addendum and the note at the top of this file.**
   Any deal registered against an *old* (pre-fix) deployment still can't ever settle on a real answer
   and needs redeploying under the corrected contract.
-- **`questionHash` drifts over real time because oracle-compiler's templates use a relative evidence
-  window (§27, see the note at the top of this file)** — now the single most important open item,
-  found while attempting §25's final live proof. A real deal compiled now and resolved at its real
-  deadline (the whole point of a deadline) will have `resolveDeal()` refuse it with
-  `question_hash_mismatch`, because IMD re-pins the relative `{hours: N}` window to new blocks on every
-  quote. No real deal can settle until oracle-compiler pins an absolute `{fromBlock, toBlock}` window
-  at compile time instead — a real design change, not started unilaterally.
+- ~~`questionHash` drifts over real time because oracle-compiler's templates use a relative evidence
+  window (§27)~~ — **fixed and proven end to end, see the note at the top of this file.**
+  `compileDeal()` now pins an absolute `{fromBlock, toBlock}` window at compile time instead of a
+  relative `{hours: N}` one, so the resolution-time re-quote's `questionHash` matches. Any deal
+  compiled before this fix still carries the old relative-window `questionHash` and can't be resolved
+  — it needs recompiling.
 - Retiring `EVM_PRIVATE_KEY` for the resolver's on-chain writes is now genuinely closed (§22).
   Typed-data signing (IMD's payment, §20) and transaction signing (§22) both work for real through
   1Claw. 1Claw's own broadcast infrastructure fails to deliver a signed transaction, but the
@@ -170,7 +171,7 @@ Balances move with every demo run, so treat these as a snapshot, not current tru
 | Chain | Asset | ~Balance |
 |---|---|---|
 | Ethereum mainnet | ETH | 0.005 |
-| Ethereum mainnet | `$IMD` | 3.59 (four real requests spent 2.0 so far; topped up twice via real swaps, §19 and §26) |
+| Ethereum mainnet | `$IMD` | 3.09 (five real requests spent 2.5 so far; topped up twice via real swaps, §19 and §26) |
 | Base mainnet | ETH | 0 (accidentally swapped away by the user this session) |
 | Base mainnet | USDC | 0 (same) |
 
@@ -217,4 +218,4 @@ order it was found:
 | 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |
 | 25 | Found and fixed a critical bug: `MilestoneEscrow.sol`'s on-chain attestation check used the wrong EIP-712 domain/struct, so no real IMD attestation was ever verifiable on-chain. Real oracle signer and signing schema confirmed for the first time; contract, resolver, and site all corrected and re-proven (56+50 tests, a real regression test recovering the real captured signature, a real local demo re-run) |
 | 26 | Topped up `$IMD` a third time with a real Uniswap v4 swap — `@uniswap/universal-router-sdk`'s API had changed materially since §19, re-verified from scratch against the currently-installed version rather than assumed |
-| 27 | **CRITICAL, unresolved**: relative `window: {hours}` in oracle-compiler's templates makes `questionHash` drift over real time — a deal's compile-time hash can never match its own resolution-time re-quote, discovered while attempting §25's final live proof; no funds lost |
+| 27 | **CRITICAL, fixed and proven end to end**: relative `window: {hours}` in oracle-compiler's templates made `questionHash` drift over real time, discovered while attempting §25's final live proof (no funds lost). Fixed by pinning an absolute `{fromBlock, toBlock}` window at compile time; verified free live, then proven with the project's first-ever complete real settlement — real escrow, real attestation, real release, real withdraw |

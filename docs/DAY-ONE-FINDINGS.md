@@ -1261,7 +1261,7 @@ to **`4.0908` `$IMD`** — enough for roughly eight more real `oracle.request` a
 The one-off swap script lived in a scratch directory outside the repo (wallet- and amount-specific,
 matching §11/§19's own convention) and was deleted after the swap completed.
 
-## 27. CRITICAL: relative `window: {hours}` makes `questionHash` drift over real time — no real deal's compile-time hash can match its own resolution-time re-quote
+## 27. CRITICAL, fixed and proven end-to-end: relative `window: {hours}` made `questionHash` drift over real time — no real deal's compile-time hash could match its own resolution-time re-quote
 
 Attempted the final proof §25 called for: deploy a fresh escrow with the corrected attestation scheme
 and settle it end to end via `resolveDeal()` with a real, brand-new IMD attestation. Real escrow
@@ -1322,6 +1322,47 @@ that never got included (no validator incentive) — confirmed by reading the st
 explicit priority fee. Fixed in the script by flooring the wallet client's chain-level
 `fees.maxPriorityFeePerGas`, which applies to every transaction sent through it, not just ones the
 script builds directly.
+
+### §27 fixed, then proven with the project's first real, complete, end-to-end settlement
+
+Fixed in `server/oracle-compiler/src/compile.ts`: after the template's normal free quote (the "probe"),
+`compileDeal()` now checks the response's `pinned` field and, if present, re-quotes once more with an
+**absolute** `window: {fromBlock, toBlock}` substituted in for the template's original relative
+`{hours}` — using the probe's own resolved range. An absolute range isn't re-pinned by IMD on a later
+quote, so the returned `questionHash` (and `input`) are stable for any future re-quote of the same
+input, no matter how much real time has passed. `OracleRequestInput.window`'s type was widened to a
+union (`{ hours } | { fromBlock, toBlock }`) to carry this. Falls back to the original relative window,
+unchanged, if a response ever lacks `pinned` — no regression either way. Centralized entirely in
+`compileDeal()`'s post-processing; the templates themselves (`releasePublished.ts`, `pageOrFileLive.ts`,
+`onchainEvent.ts`) still build the relative form they always did. Two new regression tests added
+(`compile.test.ts`) covering both the pinned-substitution path and the no-`pinned` fallback; all 32
+oracle-compiler tests, resolver's 50 tests, and `site`'s build stayed green.
+
+**Verified for free before spending anything**: a standalone script compiled a real deal, waited a real
+100 seconds (the same gap that proved the drift above), then re-quoted the exact same (now-absolute)
+input directly against the real IMD API. Both questionHashes matched exactly
+(`0x580f5824b452e7438af4e536f0ed449dfa41beb77e042037d89fe70885bb216d`) — confirming the fix live, at zero
+cost, before risking any real `$IMD`.
+
+**Then proven for real, completely, for the first time in this project's life**: re-ran
+`mainnet-real-attestation-demo.ts` (2026-09-30) with the fix in place. Real escrow deployed to Ethereum
+mainnet at
+[`0x892aba33239d8f274eeb05176e27cc7dc08aa351`](https://etherscan.io/address/0x892aba33239d8f274eeb05176e27cc7dc08aa351),
+real paid `oracle.request`, real attestation came back with `questionHash: 0x53bbaac7...c6eaf77` —
+**matching the compile-time hash exactly**, no mismatch this time. `resolveDeal()` relayed it on-chain
+(real tx
+[`0x8c80d68b...373ae0b`](https://etherscan.io/tx/0x8c80d68b6d194cbef395b7f5390120e4aa799288bd9cb6327ce04eada373ae0b)),
+the first `release()` attempt hit the still-open challenge window (`settleBlockedReason:
+"release_failed"`, the same pre-existing best-effort case documented in §24), and the idempotent retry
+20 seconds later (per §24's fix — did **not** re-buy the attestation, `trueAt` was already set)
+succeeded: `settled: true`, real settle tx
+[`0x9a9f1258...7de4cfd8`](https://etherscan.io/tx/0x9a9f12581eec0d3eeca901da73343dcb2cfd0dbe46da906d3c85313c7de4cfd8).
+Real withdraw
+([`0x86054904...4b3c54fec0`](https://etherscan.io/tx/0x860549048ee4820ecb766a4885f8d9ac7757a66ab3fe2015d10e04b3c54fec00))
+returned the escrowed 1 `$IMD` to the wallet. Final on-chain state: `Released`, `trueAt` set, `owed: 0`.
+Wallet `$IMD` went from `3.5908` to `3.0908` — exactly the `0.5` real cost of the one `oracle.request`
+this run needed, nothing more. **This is the first time any deal compiled by this project has been
+resolved end to end, entirely for real, with no manual intervention and no funds at risk at any point.**
 
 ## What's still unconfirmed (needs real signing, so held back)
 
