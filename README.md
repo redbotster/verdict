@@ -13,25 +13,32 @@ not what's assumed. Audit: [audits/2026-09-28/AUDIT-REPORT.md](audits/2026-09-28
 High + 3 Medium + 5 Low + 1 Info, all fixed. Still not a substitute for a paid human audit before
 anything real.
 
-## Fixed: real IMD attestations now verify on-chain (§25)
+## Two critical findings: the signature scheme is now fixed (§25); a deeper, separate bug still blocks real settlement (§27)
 
-`MilestoneEscrow.sol`'s on-chain check of IMD's oracle signature used the wrong EIP-712 domain name
-and struct shape — a bug affecting every escrow ever deployed under the contract, confirmed for real
-2026-09-29 (real oracle signer:
+**§25, fixed**: `MilestoneEscrow.sol`'s on-chain check of IMD's oracle signature used the wrong
+EIP-712 domain name and struct shape — a bug affecting every escrow ever deployed under the contract,
+confirmed for real 2026-09-29 (real oracle signer:
 [`0x5598Aa91...Fd32982`](https://etherscan.io/address/0x5598Aa9146215Bc13eb26f2c692Ad1461Fd32982), real
 domain `"IdentityMD Oracle"`/struct `OracleAttestation`, several corrected field types, one field —
-`blockHash` — the contract's struct never had at all). Every prior "real" proof of the contract's
-lifecycle used a throwaway local key standing in for the oracle signer, which never actually exercised
-IMD's real signature. **Now fixed and independently proven three ways**: (1) a new regression test
-recovers the exact real captured signature, via the contract's own actual hashing code, to IMD's real
-reported signer — cryptographic proof, not a self-consistent fixture; (2) all 56 contract tests plus
-all 50 resolver tests (including a real local-chain deploy/attest/release run) pass with the corrected
-schema; (3) the full local demo script re-ran for real end to end. **Not yet proven**: an actual
-on-chain `submitAttestation()` using a brand-new real IMD attestation against a freshly deployed real
-contract — blocked on real `$IMD` budget (0.09 left, well under the 0.5 a request costs), not on
-anything unresolved in the fix itself. Every escrow deployed under the *old* contract (including the
-real Base mainnet ones referenced below) is unfixable in place and would need a fresh deployment under
-the corrected version. Full details: `docs/DAY-ONE-FINDINGS.md` §25.
+`blockHash` — the contract's struct never had at all). Independently proven three ways: a regression
+test recovers a real captured signature to IMD's real reported signer through the contract's own real
+hashing code; all 56 contract tests and 50 resolver tests pass with the corrected schema; a real local
+demo re-ran end to end.
+
+**§27, found while attempting the final live proof, NOT fixed**: even with §25's fix, a real deal
+still can't settle. Both oracle-compiler templates build a *relative* evidence window
+(`window: {hours: N}`), and IMD re-pins that to exact blocks **at the moment of each quote** (confirmed,
+for free — quoting the identical input twice, 90 seconds apart, produced two different
+`questionHash` values). Since a real deal is compiled once and resolved later — its whole point — the
+resolution-time `questionHash` can never match the one baked into the contract at deploy time, for any
+realistic gap. Attempted the actual end-to-end proof for real on Ethereum mainnet (a fresh escrow,
+`0xa675c7fe...b39987`, real `$IMD` as the escrowed token, a real `resolveDeal()` call, a real paid
+oracle.request) — `resolveDeal()` correctly refused the mismatched real attestation before ever
+touching the contract, so no funds were at risk (the real `$IMD` was cleanly reclaimed once the demo's
+short deadline elapsed). The fix needs oracle-compiler to pin an *absolute* `{fromBlock, toBlock}`
+window at compile time instead — a real design change (needs a real chain read at compile time, which
+oracle-compiler has never done), reported rather than started unilaterally. Full details:
+`docs/DAY-ONE-FINDINGS.md` §25 and §27.
 
 ## What actually works
 
@@ -109,11 +116,15 @@ Each package has its own README with the real depth. This one's just for "does i
 
 - ~~`MilestoneEscrow.sol`'s attestation verification doesn't match IMD's real signature scheme at
   all~~ — **fixed and independently proven, see §25's addendum and the note at the top of this file.**
-  What's still open: no *newly* deployed escrow under the corrected contract has yet had a real IMD
-  attestation submitted against it on-chain (as opposed to the cryptographic proof using the real
-  captured signature) — blocked on real `$IMD` budget, not on anything unresolved in the fix. Any deal
-  registered against an *old* (pre-fix) deployment still can't ever settle on a real answer and needs
-  redeploying under the corrected contract.
+  Any deal registered against an *old* (pre-fix) deployment still can't ever settle on a real answer
+  and needs redeploying under the corrected contract.
+- **`questionHash` drifts over real time because oracle-compiler's templates use a relative evidence
+  window (§27, see the note at the top of this file)** — now the single most important open item,
+  found while attempting §25's final live proof. A real deal compiled now and resolved at its real
+  deadline (the whole point of a deadline) will have `resolveDeal()` refuse it with
+  `question_hash_mismatch`, because IMD re-pins the relative `{hours: N}` window to new blocks on every
+  quote. No real deal can settle until oracle-compiler pins an absolute `{fromBlock, toBlock}` window
+  at compile time instead — a real design change, not started unilaterally.
 - Retiring `EVM_PRIVATE_KEY` for the resolver's on-chain writes is now genuinely closed (§22).
   Typed-data signing (IMD's payment, §20) and transaction signing (§22) both work for real through
   1Claw. 1Claw's own broadcast infrastructure fails to deliver a signed transaction, but the
@@ -159,8 +170,9 @@ Balances move with every demo run, so treat these as a snapshot, not current tru
 | Chain | Asset | ~Balance |
 |---|---|---|
 | Ethereum mainnet | ETH | 0.005 |
-| Ethereum mainnet | `$IMD` | 4.09 (three real requests spent 1.5 so far; topped up twice via real swaps, §19 and §26) |
-| Base mainnet | ETH | 0.001 |
+| Ethereum mainnet | `$IMD` | 3.59 (four real requests spent 2.0 so far; topped up twice via real swaps, §19 and §26) |
+| Base mainnet | ETH | 0 (accidentally swapped away by the user this session) |
+| Base mainnet | USDC | 0 (same) |
 
 ## Local setup
 
@@ -205,3 +217,4 @@ order it was found:
 | 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |
 | 25 | Found and fixed a critical bug: `MilestoneEscrow.sol`'s on-chain attestation check used the wrong EIP-712 domain/struct, so no real IMD attestation was ever verifiable on-chain. Real oracle signer and signing schema confirmed for the first time; contract, resolver, and site all corrected and re-proven (56+50 tests, a real regression test recovering the real captured signature, a real local demo re-run) |
 | 26 | Topped up `$IMD` a third time with a real Uniswap v4 swap — `@uniswap/universal-router-sdk`'s API had changed materially since §19, re-verified from scratch against the currently-installed version rather than assumed |
+| 27 | **CRITICAL, unresolved**: relative `window: {hours}` in oracle-compiler's templates makes `questionHash` drift over real time — a deal's compile-time hash can never match its own resolution-time re-quote, discovered while attempting §25's final live proof; no funds lost |

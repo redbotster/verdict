@@ -1261,6 +1261,68 @@ to **`4.0908` `$IMD`** — enough for roughly eight more real `oracle.request` a
 The one-off swap script lived in a scratch directory outside the repo (wallet- and amount-specific,
 matching §11/§19's own convention) and was deleted after the swap completed.
 
+## 27. CRITICAL: relative `window: {hours}` makes `questionHash` drift over real time — no real deal's compile-time hash can match its own resolution-time re-quote
+
+Attempted the final proof §25 called for: deploy a fresh escrow with the corrected attestation scheme
+and settle it end to end via `resolveDeal()` with a real, brand-new IMD attestation. Real escrow
+deployed on Ethereum mainnet (using real `$IMD` itself as the escrowed token, since the ops wallet's
+Base balance had been separately swapped away): `0xa675c7fedfa88377896909be7b4b836b11b39987`. Real
+`resolveDeal()` call, real paid `oracle.request`, real attestation came back — and `resolveDeal()`
+correctly refused it with `question_hash_mismatch`, **before ever attempting `submitAttestation()`** (so
+no funds were ever at risk; see the recovery below).
+
+**This was IMD behaving correctly, and the project's own guard working correctly — the bug is upstream,
+in how this project builds the oracle input it compiles once and expects to remain valid until
+resolution.** Both real oracle-compiler templates (`releasePublished.ts`, `pageOrFileLive.ts`) build a
+**relative** evidence window — `window: { hours: N }`, computed once via `calendarWindow()` as "N hours
+spanning [compile time, deadline + 1 day]." Per IMD's own docs (`docs.imd.fun`, "Oracle body"): "window
+... Pinned to exact blocks **at the quote**." Confirmed for real, for free (no `$IMD` spent — quoting
+is always free, §2): quoting the *exact same* `OracleRequestInput` object twice, 90 seconds apart,
+produced two different `questionHash` values, because IMD re-pins `{hours: N}` to "N hours from the
+moment of *this* quote," not from the original compile-time moment — the `pinned.fromBlock`/`toBlock`
+in the raw quote response visibly advance between the two calls, and the hash moves with them. A
+3-second gap between quotes did *not* show drift; 90 seconds did — somewhere in between is IMD's
+effective pinning granularity.
+
+**Why this was never caught before**: every earlier script that made two separate quote calls for the
+same deal (`compileDeal()`'s own internal free quote, then a second real quote for payment — §14, §19,
+§20, §25) always did so back-to-back with no real on-chain transactions in between, so the gap was
+well under a second. This is the *first* time a real approve+deploy (real block confirmations) sat
+between the compile-time quote and the resolution-time quote, which is exactly what a real deal's
+actual lifecycle looks like — compile at creation time, resolve at the deadline, hours or days later.
+**No real deal using this project's current templates could ever have its resolution-time attestation
+match its own deploy-time `questionHash`, for any realistic gap between creating and resolving a deal.**
+This is a deeper problem than §25: even with the EIP-712 scheme now fully correct, a real deal still
+can't settle, because the *question itself* isn't stable across time the way the architecture assumes.
+
+**Not fixed here.** The real fix needs oracle-compiler's templates to pin an *absolute* window
+(`{fromBlock, toBlock}`, which IMD's schema already supports per its own docs and per `docs/SPEC.md`'s
+note about deals over 30 days) at compile time instead of a relative `{hours}` spec — which means
+oracle-compiler needs to read a real block number from a real RPC at build time, something it has never
+needed to do before (it's been a pure text/LLM template-filling module), plus a decision on which RPC
+to use for the "evidence chain" and how coarse a blocks-per-hour estimate is acceptable. That's a real
+design change to a widely-used package (`compileDeal()`, used by every demo script and by `/new`'s real
+UI flow), not a one-line patch — reported rather than started unilaterally, same as §25.
+
+**No funds were lost.** The escrow never got an attestation submitted (`resolveDeal()` refused first),
+so `state` stayed `Funded`, `trueAt` stayed `0`. Once `deadline + grace` elapsed (kept short for this
+demo — 10 minutes + 1 minute), the real 1 `$IMD` was recovered via the same permissionless
+`reclaim()` + `withdraw()` sequence proven safe in §22: real reclaim
+([`0xea571720...cc6777f`](https://etherscan.io/tx/0xea57172068cce8292eda4dd8a6976826b2c33ab1bab2bcf851c92474ecc6777f))
+and real withdraw
+([`0x8905980d...86fb1ed`](https://etherscan.io/tx/0x8905980d9b0a3e9fc8f8da4bdca9f02c8897c2adad74e79e225a3737186fb1ed)),
+both `status: success`. Final wallet balance `3.5908 $IMD` — exactly the pre-test `4.0908` minus the
+`0.5` genuinely spent on the one real `oracle.request` this proof needed, confirming nothing beyond
+that intended cost was lost.
+
+**Also confirmed live, incidentally**: the default public Ethereum RPC's `eth_maxPriorityFeePerGas`
+returned `0` on the first attempt at this proof, producing a transaction with `maxPriorityFeePerGas: 0`
+that never got included (no validator incentive) — confirmed by reading the stuck transaction back via
+`eth_getTransaction` and observing it sit unconfirmed, then replacing it at the same nonce with an
+explicit priority fee. Fixed in the script by flooring the wallet client's chain-level
+`fees.maxPriorityFeePerGas`, which applies to every transaction sent through it, not just ones the
+script builds directly.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
