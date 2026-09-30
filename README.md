@@ -159,7 +159,7 @@ Balances move with every demo run, so treat these as a snapshot, not current tru
 | Chain | Asset | ~Balance |
 |---|---|---|
 | Ethereum mainnet | ETH | 0.005 |
-| Ethereum mainnet | `$IMD` | 0.09 (three real requests spent 1.5 so far; topped up once via a real swap, §19) |
+| Ethereum mainnet | `$IMD` | 4.09 (three real requests spent 1.5 so far; topped up twice via real swaps, §19 and §26) |
 | Base mainnet | ETH | 0.001 |
 
 ## Local setup
@@ -204,3 +204,4 @@ order it was found:
 | 23 | `/new` can now actually deploy the escrow (payer approves + deploys); proven on local Anvil, then proven again with a real browser click-through of the actual UI |
 | 24 | Fixed two real production-readiness bugs: `resolveDeal()` wasn't idempotent (a retry re-spent real `$IMD`), and every registered deal defaulted to needing an approval that could never come (hard-failed every real settlement). Also surfaced an unresolved contract-level gap: funds have no recovery path if an approval is ever denied after a true attestation lands |
 | 25 | Found and fixed a critical bug: `MilestoneEscrow.sol`'s on-chain attestation check used the wrong EIP-712 domain/struct, so no real IMD attestation was ever verifiable on-chain. Real oracle signer and signing schema confirmed for the first time; contract, resolver, and site all corrected and re-proven (56+50 tests, a real regression test recovering the real captured signature, a real local demo re-run) |
+| 26 | Topped up `$IMD` a third time with a real Uniswap v4 swap — `@uniswap/universal-router-sdk`'s API had changed materially since §19, re-verified from scratch against the currently-installed version rather than assumed |

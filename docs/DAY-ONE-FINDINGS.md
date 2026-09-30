@@ -1221,6 +1221,46 @@ fixed `eip712.ts`/`types.ts`/`relay.ts` — is what the live webhook actually ru
 version from the earlier activation deploy. Confirmed healthy post-deploy with a real request against
 a nonexistent deal address (`404`, same check as the activation itself).
 
+## 26. Topped up `$IMD` a third time — same real Uniswap v4 pool, SDK API changed again since §19
+
+User sent 0.01 real ETH to the ops wallet and asked for it to be swapped for `$IMD`. The
+`@uniswap/universal-router-sdk` version installed fresh for this (5.14.0) has a materially different
+public API than what §11/§19 used — `SwapRouter.encodeSwaps(spec, swapSteps)` instead of the trade-object
+based `swapCallParameters`/hand-built `v4Actions` array directly — confirming, again, that this has to be
+re-verified against whatever's actually installed each time, never assumed from a prior write-up.
+
+**Re-derived the pool facts from scratch, independently of §11's write-up**: DexScreener's
+`pairAddress` for the real IMD/ETH v4 pool (`0xb07d640f...15abfb3`) is the `PoolId`; read
+`PoolManager`'s (`0x000000000004444c5dc75cB358380D2e3dE08A90`) real `Initialize` event log for that
+exact ID via `rpc.mevblocker.io` (the same reliable free RPC from §11) to recover the real `PoolKey`
+(`currency0: ETH (0x0)`, `currency1: IMD`, `fee: 10000`, `tickSpacing: 200`, `hooks: 0x0`) — confirmed
+using the real ABI from `@uniswap/universal-router`'s own typechain output, not a hand-typed event
+signature — and independently verified by recomputing `keccak256(abi.encode(poolKey))` locally,
+reproducing the exact pool ID byte-for-byte. Got a real quote first via `V4Quoter.quoteExactInputSingle`
+(`0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203`, confirmed from `docs.uniswap.org/contracts/v4/deployments`,
+using the real ABI from `@uniswap/v4-periphery`'s compiled output) — not guessed.
+
+**Three real SDK validation errors in sequence, each one informative, none of them a real revert**:
+`SETTLE_ALL_REQUIRES_DIRECT_TRANSFERS` → `TAKE_ALL_REQUIRES_SENDER_RECIPIENT` → (switching to
+`allowDirectTransfers: true`) `DIRECT_TRANSFERS_NATIVE_INPUT`. That last one rules out direct-transfer
+mode entirely for a native-ETH input (confirmed by reading the SDK's own source: there's nothing to
+"pull" from the user, ETH only arrives via `msg.value`) — meaning `SETTLE_ALL`/`TAKE_ALL` (which
+require direct transfers) can never work for this exact case, regardless of `spec.recipient`. The
+working pattern was router-custody mode (the default) with plain `SETTLE`/`TAKE`: `v4Actions:
+[SWAP_EXACT_IN_SINGLE, {action:"SETTLE", currency: ethAddress, amount: CONTRACT_BALANCE, payerIsUser:
+false}, {action:"TAKE", currency: imdAddress, recipient: ROUTER_AS_RECIPIENT, amount: "0"}]` — the
+exact same shape §11 documented, still correct even though the surrounding `encodeSwaps` API around it
+had changed.
+
+**Simulated via `eth_call` before sending** (same discipline as §11/§19), then broadcast for real.
+
+**Result**: real transaction
+[`0x5e44d8f2...c149615`](https://etherscan.io/tx/0x5e44d8f28ac03e4a298cb86f7d68e75e6d31ef31c9bb00afcc1d46ddcc149615),
+confirmed in block 26086609, `status: success`, `gasUsed: 113661`. The ops wallet went from `0.0917`
+to **`4.0908` `$IMD`** — enough for roughly eight more real `oracle.request` actions at 0.5 IMD each.
+The one-off swap script lived in a scratch directory outside the repo (wallet- and amount-specific,
+matching §11/§19's own convention) and was deleted after the swap completed.
+
 ## What's still unconfirmed (needs real signing, so held back)
 
 - ~~The exact EIP-712 `quoteApprovalTypedData` schema... and the exact Permit2 integration
