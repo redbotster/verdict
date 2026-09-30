@@ -112,11 +112,16 @@ one shared ops wallet to real per-user treasury wallets.
    `$IMD`'s actual on-chain liquidity depends on 0x's routing, not on 1Claw. Cheap to check
    for real with a small quote before committing.
 4. **Spend policies**: what `max_value_per_tx`/`daily_limit` make sense, given deals can be
-   arbitrary sizes? Too tight blocks legitimate deals; too loose defeats the point.
+   arbitrary sizes? Too tight blocks legitimate deals; too loose defeats the point. **Not
+   resolved** — a conservative starting default is live (see Phase 4) as a safety rail, sized
+   from this project's own historical amounts, not a considered answer for real deal sizes.
 5. **Where 1Claw's Platform API sits relative to `site/`'s existing Supabase schema.**
    Recommendation: keep Supabase as the deal-record source of truth; add a
    `oneclaw_connection_id` / wallet address column per deal party rather than replacing
-   Supabase with 1Claw's own user store.
+   Supabase with 1Claw's own user store. **Schema done** (Phase 3's `owner_oneclaw_user_id`
+   column), but **not resolved**: nothing yet decides or builds the session mechanism that
+   would actually populate/enforce it, which needs a real answer before this is genuine
+   multi-tenancy rather than an unused column.
 
 ## Implementation phases
 
@@ -176,9 +181,24 @@ nothing populates or enforces `owner_oneclaw_user_id`. That needs a real session
 linking a signed-in embedded-wallet user (client-side) to `/new`'s server actions, which
 wasn't decided (see Open decision 5) and is a real design choice, not a default to assume.
 
-**Phase 4 — Spend policies**
-- Configure real spend limits (Open decision 4) before any real third-party funds move
-  through this.
+**Phase 4 — Spend policies. Done (2026-09-30), conservative starting default.**
+
+Created a real, live, enforced app-level default spend policy (`POST
+/v1/platform/apps/{appId}/spend-policies`, id `f64ca97e-6768-4ebb-a215-3f5dc8100f83`):
+`max_value_per_tx_eth: 0.05`, `daily_limit_eth: 0.25`, `allowed_chains: ["ethereum"]`,
+`max_transactions_per_day: 20`. No `to_allowlist`, since the funding-only flow (Phase 3)
+sends to an arbitrary deploy wallet the user chooses, not a fixed address. This is
+deliberately conservative and a starting point, not a resolved Open decision 4 — it's a
+safety rail (can only block spend, never lose funds) sized against this project's own
+historical real amounts (§19/§25/§27: escrows and oracle payments on the order of 0.5–1
+`$IMD`), not a considered answer for real third-party deal sizes. Raise it via
+`setUserSpendPolicy()`/another `createSpendPolicy()` call once real limits are decided.
+Enforcement is server-side (`validate_wallet_send()`) regardless of what the UI shows, so
+this holds even though nothing in `site/` pre-fetches or displays the limit — the docs'
+suggested `getEffectiveSpendPolicy()` pre-flight call is only exposed on the raw `@1claw/sdk`
+client, not on `wallet-react`'s `useOneclawWallet()` hook, and the widget already surfaces a
+403 policy violation as a toast on its own, so skipped pulling in a second SDK client for
+display-only polish.
 
 ## Explicitly out of scope for this plan
 
