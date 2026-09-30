@@ -61,18 +61,6 @@ Each package has its own README with the real depth. This one's just for "does i
   confirmation UX (proven with an injected `window.ethereum` instead). Deploying elsewhere and
   registering the address afterward works either way.
 
-## Ops wallet
-
-`0xF57CfAF1f2b12E7f23C342c4fAfd675379840668`, key in `~/.secrets/verdict.env`, never committed.
-Balances move with every demo run, so treat these as a snapshot, not current truth:
-
-| Chain | Asset | ~Balance |
-|---|---|---|
-| Ethereum mainnet | ETH | 0.005 |
-| Ethereum mainnet | `$IMD` | 3.09 |
-| Base mainnet | ETH | 0 |
-| Base mainnet | USDC | 0 |
-
 ## Local setup
 
 ```
