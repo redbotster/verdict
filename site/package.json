@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@1claw/wallet-react": "^0.6.1",
     "@verdict/imd-client": "file:../server/imd-client",
     "@verdict/oracle-compiler": "file:../server/oracle-compiler",
     "@verdict/oneclaw-client": "file:../server/oneclaw-client",

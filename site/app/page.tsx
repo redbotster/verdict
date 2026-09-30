@@ -13,9 +13,14 @@ export default async function Home() {
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Verdict</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Oracle-settled milestone escrows on IMD + 1Claw.</p>
         </div>
-        <Link href="/new" className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
-          New deal
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/wallet" className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-900 dark:border-zinc-700 dark:text-zinc-50">
+            Wallet
+          </Link>
+          <Link href="/new" className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+            New deal
+          </Link>
+        </div>
       </div>
 
       {deals.length === 0 ? (
