@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createWalletClient, createPublicClient, custom, getContractAddress, type Address } from "viem";
 import { compileReleaseDeal, registerDeal, getDeploymentArtifact, type CompileFormInput } from "./actions";
 import { computeTermsHash } from "@/lib/terms";
+import { useWalletSession } from "../WalletSessionContext";
 import type { OracleRequestInput } from "@verdict/oracle-compiler";
 
 const ERC20_APPROVE_ABI = [
@@ -37,6 +38,7 @@ async function connectWallet(): Promise<Address> {
 }
 
 export function NewDealForm() {
+  const { user: walletUser } = useWalletSession();
   const [step, setStep] = useState<Step>("form");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -232,6 +234,7 @@ export function NewDealForm() {
       input: compiled.input,
       questionHash: compiled.questionHash,
       approvalThresholdBaseUnits: approvalThreshold,
+      ownerOneclawUserId: walletUser?.userId,
     });
     if (!result.ok) {
       setRegisterStatus("idle");
@@ -404,6 +407,19 @@ export function NewDealForm() {
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Once the payload above has actually been deployed, paste the resulting address here. This reads its real on-chain state and refuses to save anything whose
             questionHash doesn&apos;t match what was compiled.
+          </p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {walletUser ? (
+              <>
+                Registering as <span className="font-mono">{walletUser.email}</span> (not an access-control check — see{" "}
+                <code className="font-mono">WalletSessionContext.tsx</code>).
+              </>
+            ) : (
+              <>
+                Not signed in — this deal will be registered with no owner. <a href="/wallet" className="underline">Sign in</a> first if you want it attributed to your
+                account.
+              </>
+            )}
           </p>
           {registerError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">{registerError}</div>}
           <Field label="Deployed escrow address">

@@ -99,6 +99,11 @@ export interface RegisterDealInput {
    * other way around.
    */
   approvalThresholdBaseUnits?: string;
+  // The signed-in embedded-wallet user (if any) registering this deal — see
+  // docs/designs/multi-tenant-1claw-wallets.md. Not verified server-side against a real 1Claw
+  // session; the client reads it from its own cached onLogin state (WalletSessionContext.tsx),
+  // so treat this as a label, not an authorization check.
+  ownerOneclawUserId?: string;
 }
 
 export type RegisterDealResult = { ok: true } | { ok: false; error: string };
@@ -141,6 +146,7 @@ export async function registerDeal(form: RegisterDealInput): Promise<RegisterDea
       expectedQuestionHash: form.questionHash as `0x${string}`,
       payoutEstimateBaseUnits,
       approvalThresholdBaseUnits: form.approvalThresholdBaseUnits || undefined,
+      ownerOneclawUserId: form.ownerOneclawUserId || undefined,
     });
   } catch (err) {
     return { ok: false, error: `Could not save to the database: ${err instanceof Error ? err.message : String(err)}` };

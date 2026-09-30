@@ -181,6 +181,30 @@ nothing populates or enforces `owner_oneclaw_user_id`. That needs a real session
 linking a signed-in embedded-wallet user (client-side) to `/new`'s server actions, which
 wasn't decided (see Open decision 5) and is a real design choice, not a default to assume.
 
+**Update (2026-09-30): session wiring built, but blocked on a real CORS gap in `api.1claw.co`.**
+Built `WalletSessionContext.tsx` (caches `EmbeddedWalletUser` from the widget's `onLogin`/
+`onLogout` callbacks, since `wallet-react` has no `currentUser` getter — see feedback below),
+lifted `OneclawWalletProvider` to the app root (`app/AppProviders.tsx`, accepting the
+site-wide SSR tradeoff decided above), and threaded the cached user's id through to
+`registerDeal()`. Typechecks, builds, and the widget still renders correctly.
+
+**But real testing found this can't actually complete a sign-in from any third-party origin
+right now.** Confirmed directly against the real API (not assumed): `api.1claw.co` sends
+`access-control-allow-origin: https://1claw.co` for their own domain, but sends **no**
+CORS header at all — on the actual response, not just preflight — for `http://localhost:3000`
+(ours), `http://localhost:3080` (the pre-existing "Fathom (dev)" app's own registered dev
+origin), with or without an Authorization header present. This holds on both
+`GET /v1/treasury/wallets` and the real `POST /v1/auth/email-otp/send` sign-in call.
+Registering `redirect_uris` on the platform app (which I tried first, reasoning from Fathom's
+config) made no difference. A browser will render the widget's sign-in screen fine (no API
+call needed for that), but block the response the moment a real login is attempted — from
+any domain except 1claw.co's own, including once this ships to Verdict's real production
+domain, not just localhost. This is a structural gap in `api.1claw.co`, not something fixable
+from Verdict's side except by building a same-origin reverse proxy (pointing `wallet-react`'s
+`baseUrl` at our own domain, forwarding server-side to `api.1claw.co`) — undocumented as a
+required pattern anywhere in 1Claw's guides, and a real scope decision, not something to
+build unilaterally. See the feedback list — this is now the top item.
+
 **Phase 4 — Spend policies. Done (2026-09-30), conservative starting default.**
 
 Created a real, live, enforced app-level default spend policy (`POST
