@@ -26,7 +26,13 @@ export interface OracleRequestInput {
   v: 1;
   question: string;
   chainId: number;
-  window: { hours: number };
+  // `{ hours }` is what every template builds initially — relative to whenever it's next quoted, per
+  // IMD's own docs ("Pinned to exact blocks at the quote"). `{ fromBlock, toBlock }` is what
+  // compileDeal() replaces it with after a real probe quote resolves that relative window into an
+  // absolute range — see docs/DAY-ONE-FINDINGS.md §27. An absolute range doesn't drift on re-quote,
+  // which a relative one does; `input.window` should be the absolute form by the time it's used for
+  // anything beyond that first probe.
+  window: { hours: number } | { fromBlock: number; toBlock: number };
   answerType: "bool";
   evidence: "panel" | "chain";
   panelSize: number;

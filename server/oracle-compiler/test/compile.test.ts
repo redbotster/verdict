@@ -66,6 +66,54 @@ test("compileDeal: happy path returns the questionHash from the dry-run quote", 
   }
 });
 
+test("compileDeal: re-quotes with an absolute window once the first quote resolves a pinned block range (§27)", async () => {
+  // A relative window: {hours} gets re-pinned to fresh blocks on every quote (confirmed live,
+  // docs/DAY-ONE-FINDINGS.md §27), so compileDeal() must swap in the *absolute* range the first
+  // quote resolved before computing the questionHash it actually returns — otherwise a later
+  // re-quote of the same deal (at real resolution time) would never match.
+  const quoteCalls: unknown[] = [];
+  const result = await compileDeal("acme/widget must publish a release by 2026-10-16.", {
+    extract: async () => baseExtraction(),
+    quote: async (input) => {
+      quoteCalls.push(input.window);
+      if (quoteCalls.length === 1) {
+        // First (probe) call: still the template's original relative window.
+        assert.deepEqual(input.window, { hours: (input.window as { hours: number }).hours });
+        return { order: fakeOrder(JSON.stringify({ questionHash: "0xprobe", pinned: { fromBlock: 100, toBlock: 200 } })) };
+      }
+      // Second (final) call: the probe's pinned range substituted in as an absolute window.
+      assert.deepEqual(input.window, { fromBlock: 100, toBlock: 200 });
+      return { order: fakeOrder(JSON.stringify({ questionHash: "0xfinal" })) };
+    },
+  });
+
+  assert.equal(quoteCalls.length, 2);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    // The returned questionHash is the *final* (absolute-window) quote's, not the probe's.
+    assert.equal(result.questionHash, "0xfinal");
+    assert.deepEqual(result.input.window, { fromBlock: 100, toBlock: 200 });
+  }
+});
+
+test("compileDeal: skips the second quote and keeps the relative window if the response has no pinned range", async () => {
+  let calls = 0;
+  const result = await compileDeal("acme/widget must publish a release by 2026-10-16.", {
+    extract: async () => baseExtraction(),
+    quote: async () => {
+      calls++;
+      return { order: fakeOrder(JSON.stringify({ questionHash: "0xonly" })) }; // no `pinned` field at all
+    },
+  });
+
+  assert.equal(calls, 1); // no wasted second quote when there's no pinned range to substitute
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.questionHash, "0xonly");
+    assert.ok("hours" in result.input.window); // unchanged — still the original relative window
+  }
+});
+
 test("compileDeal: refuses when extraction finds no matching template", async () => {
   const result = await compileDeal("Please be a good partner and do your best.", {
     extract: async () => baseExtraction({ kind: "unsupported", githubRepo: null }),

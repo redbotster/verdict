@@ -45,7 +45,9 @@ test("releasePublishedTemplate: builds a body matching the confirmed live schema
   assert.equal(input.guards.sources?.[0], "https://github.com/acme/widget/");
   assert.equal(input.guards.minSources, 1);
   assert.match(input.definitions.missing, /not false/);
-  // start (Oct 1) to deadline+1day (Oct 17) is 16 days
+  // start (Oct 1) to deadline+1day (Oct 17) is 16 days — Template.build() always returns the relative
+  // {hours} shape; only compileDeal() ever replaces it with an absolute {fromBlock, toBlock} (§27).
+  assert.ok("hours" in input.window);
   assert.equal(input.window.hours, 16 * 24);
 });
 

@@ -104,9 +104,29 @@ export async function compileDeal(dealText: string, options: CompileOptions = {}
     const input = template.build(extraction, { evidenceChainId, startIso, validForSeconds });
 
     try {
-      const { order } = await quote(input, randomUUID());
-      const parsed = JSON.parse(order.inputJson) as { questionHash: string };
-      return { ok: true, kind: template.kind, extraction, input, questionHash: parsed.questionHash, attempts: attempt };
+      // Every template builds a *relative* `window: {hours}` — but IMD re-pins that to an absolute
+      // block range fresh at every quote (confirmed live, docs/DAY-ONE-FINDINGS.md §27), which means a
+      // questionHash computed from a relative window can never match a later re-quote at actual
+      // resolution time. That's fatal for this whole architecture: a deal is compiled once and
+      // resolved later, at its deadline — the entire point of having one. Fixed by re-quoting once
+      // more with the first quote's own resolved `pinned` range substituted in as an absolute
+      // `{fromBlock, toBlock}` window: an absolute range doesn't get re-pinned, so every future quote
+      // of the returned `input` reproduces the same questionHash. Both quotes are free (§2) — this
+      // costs nothing beyond one extra network round trip. Falls back to the original relative window,
+      // unchanged, if a response ever comes back without a `pinned` range (no regression either way).
+      const { order: probeOrder } = await quote(input, randomUUID());
+      const probeParsed = JSON.parse(probeOrder.inputJson) as { questionHash: string; pinned?: { fromBlock: number; toBlock: number } };
+
+      let finalInput = input;
+      let finalQuestionHash = probeParsed.questionHash;
+      if (probeParsed.pinned) {
+        finalInput = { ...input, window: { fromBlock: probeParsed.pinned.fromBlock, toBlock: probeParsed.pinned.toBlock } };
+        const { order } = await quote(finalInput, randomUUID());
+        const parsed = JSON.parse(order.inputJson) as { questionHash: string };
+        finalQuestionHash = parsed.questionHash;
+      }
+
+      return { ok: true, kind: template.kind, extraction, input: finalInput, questionHash: finalQuestionHash, attempts: attempt };
     } catch (err) {
       if (err instanceof ImdApiError && err.httpStatus === 422) {
         priorError = `${err.body.error}${err.body.detail ? ` — ${err.body.detail}` : ""}`;
