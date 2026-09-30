@@ -135,11 +135,46 @@ one shared ops wallet to real per-user treasury wallets.
 - Real test: a small real swap into `$IMD` (a few dollars), to settle Open decision 3 before
   building further on top of it.
 
-**Phase 3 — Multi-tenant deal flow**
-- Supabase schema: add `user_id`/`oneclaw_connection_id` to the deals table; scope every
-  query per user.
-- `/new`: the payer deploys and funds the escrow from *their own* embedded wallet, not the
-  shared ops wallet.
+**Status (2026-09-30): Phases 1–2 done and verified live.** Registered a real Platform App
+(`Verdict`, id `57657f05-a672-4352-a2ce-ab7557cf572f`), built `site/app/wallet/`, and confirmed
+in a real browser that the widget mounts, calls the real Platform API with the real `plt_`
+key, and correctly falls back to the sign-in screen pre-login. Built against the installed
+`@1claw/wallet-react` package's actual `.d.ts`, which disagrees with the docs' sample code in
+several places (`features` is `{send,swap,buy,receive}` booleans, not a string array; `theme`
+is `"light"|"dark"|"auto"`, not `"system"`; `appId` is a required prop). Not yet done: a real
+sign-in (needs a real inbox for the OTP code) and settling Open decision 3 (a real `$IMD` swap
+test).
+
+**Phase 3 — Multi-tenant deal flow (real finding narrowed this phase's scope)**
+
+While building this, found that 1Claw's embedded/treasury wallet API — confirmed by reading
+the actual Send/Swap/Receive and Advanced guides, not assumed — only exposes `send` (simple
+transfers) and `swap` (0x DEX). There is no generic sign-message/typed-data endpoint and no
+contract-deployment endpoint for human treasury wallets (`send`'s `data` field exists in the
+real SDK types but `to` is required, so it can call a contract, not deploy one). That means
+the embedded wallet, as built, **cannot** replace what `/new`'s existing `window.ethereum`
+flow does: signing `payerAuthorization`/`payeeAcknowledgment` or deploying
+`MilestoneEscrow.sol`. The more capable option — 1Claw's Safe multisig treasuries, whose
+proposals accept arbitrary `to`/`data`/`operation` — could support this, but means deploying a
+Safe per user and wiring a proposal→sign→execute lifecycle: real additional scope, not what
+was planned.
+
+Decided (2026-09-30): keep the embedded wallet to **funding only**. A user signs in, buys or
+swaps into `$IMD` via the widget's built-in `buy`/`swap` views, then uses the widget's own
+`send` view to move it to whatever wallet they'll use to deploy/sign — `/new`'s
+`window.ethereum` flow is unchanged. This needed no new UI: the `send`/`swap`/`buy` features
+enabled in Phase 2 already cover it.
+
+Built:
+- `deals` table: added a nullable `owner_oneclaw_user_id` column
+  (`site/supabase/migrations/0001_add_owner_oneclaw_user_id.sql`, applied for real against the
+  live instance), and threaded `ownerOneclawUserId` through `DealMetadata`/`DealRow`/
+  `CreateDealInput` in `site/lib/deals.ts`.
+
+Deliberately not built yet — this is schema/type readiness, not working multi-tenancy:
+nothing populates or enforces `owner_oneclaw_user_id`. That needs a real session mechanism
+linking a signed-in embedded-wallet user (client-side) to `/new`'s server actions, which
+wasn't decided (see Open decision 5) and is a real design choice, not a default to assume.
 
 **Phase 4 — Spend policies**
 - Configure real spend limits (Open decision 4) before any real third-party funds move

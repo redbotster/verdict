@@ -22,6 +22,11 @@ export interface DealMetadata {
   expectedQuestionHash?: `0x${string}`;
   payoutEstimateBaseUnits?: string;
   approvalThresholdBaseUnits?: string;
+  // The 1Claw Platform API user_id of whoever registered this deal, when they were signed in via
+  // the embedded wallet (docs/designs/multi-tenant-1claw-wallets.md). Nullable: nothing populates or
+  // enforces this yet — /new has no session wiring linking a signed-in wallet user to the register
+  // step, so this is schema/type readiness for that work, not multi-tenant scoping itself.
+  ownerOneclawUserId?: string;
 }
 
 interface DealRow {
@@ -37,6 +42,7 @@ interface DealRow {
   expected_question_hash: string;
   payout_estimate_base_units: string;
   approval_threshold_base_units: string | null;
+  owner_oneclaw_user_id: string | null;
 }
 
 function rowToMetadata(row: DealRow): DealMetadata {
@@ -52,6 +58,7 @@ function rowToMetadata(row: DealRow): DealMetadata {
     expectedQuestionHash: row.expected_question_hash as `0x${string}`,
     payoutEstimateBaseUnits: row.payout_estimate_base_units,
     approvalThresholdBaseUnits: row.approval_threshold_base_units ?? undefined,
+    ownerOneclawUserId: row.owner_oneclaw_user_id ?? undefined,
   };
 }
 
@@ -91,6 +98,7 @@ export interface CreateDealInput {
   expectedQuestionHash: `0x${string}`;
   payoutEstimateBaseUnits: string;
   approvalThresholdBaseUnits?: string;
+  ownerOneclawUserId?: string;
 }
 
 // Persists a real deal once its escrow is actually deployed — not called by /new today, which only
@@ -110,6 +118,7 @@ export async function createDeal(input: CreateDealInput): Promise<void> {
     expected_question_hash: input.expectedQuestionHash,
     payout_estimate_base_units: input.payoutEstimateBaseUnits,
     approval_threshold_base_units: input.approvalThresholdBaseUnits ?? null,
+    owner_oneclaw_user_id: input.ownerOneclawUserId ?? null,
   });
 }
 
