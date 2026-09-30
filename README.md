@@ -15,6 +15,31 @@ anything real.
 
 ## How it works
 
+```mermaid
+flowchart TB
+    Payer((Payer))
+    Payee((Payee))
+    Site["site/\ndeal creation, approval, deploy, register"]
+    Compiler["server/oracle-compiler\nEnglish deal → questionHash"]
+    Escrow[["contracts/MilestoneEscrow.sol\n(on-chain escrow)"]]
+    Resolver["server/resolver\nfires at deadline"]
+    OneClaw(("1Claw\nsigning"))
+    IMD(("IMD\noracle"))
+
+    Payer -- "describes deal" --> Site
+    Payee -- "reviews & approves" --> Site
+    Site -- "compile" --> Compiler
+    Compiler -- "free quote" --> IMD
+    IMD -- "questionHash" --> Compiler
+    Site -- "deploy + fund" --> Escrow
+    Resolver -- "buy attestation" --> IMD
+    IMD -- "signed attestation" --> Resolver
+    OneClaw -. "signs payment + on-chain writes" .-> Resolver
+    Resolver -- "release() / reclaim()" --> Escrow
+    Escrow -- "payout" --> Payee
+    Escrow -- "refund" --> Payer
+```
+
 1. `server/oracle-compiler` turns a plain-English deal into a binding IMD question (`questionHash`),
    picking from three templates (GitHub release published, page/file content, on-chain transfer).
 2. `contracts/MilestoneEscrow.sol` holds the payer's funds against that `questionHash` and IMD's real
