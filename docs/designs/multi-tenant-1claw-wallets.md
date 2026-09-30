@@ -205,6 +205,55 @@ from Verdict's side except by building a same-origin reverse proxy (pointing `wa
 required pattern anywhere in 1Claw's guides, and a real scope decision, not something to
 build unilaterally. See the feedback list — this is now the top item.
 
+**1Claw's response (2026-09-30): all seven feedback items addressed, shipped as
+`@1claw/wallet-react` 0.7.0.** Upgraded and re-verified against the real installed types
+(not the changelog prose) before touching any code:
+
+- **CORS fix: attempted, not yet confirmed working.** Per the described design, per-app
+  `allowed_origins` should be settable via `PATCH /v1/platform/apps/{id}` (the `plt_` key
+  rejects unknown fields with a real `400` — confirmed, it's restricted to
+  `siwe_domain`/`redirect_uris` only — so I used the org `1ck_` key instead, which returned
+  `200`). **But a real, direct re-test of the CORS preflight for `http://localhost:3000`,
+  repeated after their documented 60s cache window plus several more minutes, still shows no
+  `access-control-allow-origin` header at all.** The app's own `GET` response also never echoes
+  an `allowed_origins` field back (unlike `redirect_uris`, which does show), so there's no way
+  to confirm from our side whether the write actually took effect, used the right field name,
+  or needs a different request shape entirely. Made one well-reasoned attempt using their
+  exact described field name rather than guessing further blindly — **this needs to go back to
+  the 1Claw team to confirm the real mechanism before relying on it.** Also still need
+  Verdict's real production domain added once the local case is confirmed working at all.
+- **`currentUser`, fixed**: `useOneclawWallet()` now has `currentUser: EmbeddedWalletUser | null`
+  (rehydrated from a real `GET /v1/auth/me`-equivalent call on mount, survives a reload) and
+  `getCurrentUser()` to re-ask. This makes `WalletSessionContext.tsx` (our workaround) dead
+  code — removed it and switched `NewDealForm.tsx` to `useOneclawWallet().currentUser` directly.
+- **`getEffectiveSpendPolicy`, fixed**: now on the hook too, at the real path
+  `GET /v1/treasury/wallets/spend-policy` (not `/spend-policy/effective` as initially assumed
+  when the fix was drafted — worth noting even 1Claw's own team re-verified against their real
+  route rather than trusting a guess).
+- **`theme`, fixed**: `theme?: "light" | "dark" | "auto" | ThemeConfig` — confirmed in the
+  installed `.d.ts`. `brandColor` stays a separate top-level prop too.
+- **`features`/`socialProviders` docs**: corrected upstream to match the shipped types (which
+  is what we'd already built against).
+- **`send({ data })`, confirmed real and now documented**: arbitrary contract calls work today
+  through the simple treasury wallet, sanctions-screened like any other send — no Safe needed.
+  This **reopens part of the Phase 3 scope decision**: the embedded wallet might now be able to
+  call `approve()` directly (not just move funds to an external wallet), though it still can't
+  deploy `MilestoneEscrow.sol` itself (`to` stays required — no `CREATE`). Not yet acted on;
+  flagging for a real decision rather than quietly expanding scope.
+- **Custody contradiction, resolved the other way than we assumed**: the marketing/overview
+  pages were right — FROST (Solana) and passkey Safes (EVM) self-custody have been live since
+  2026-09-18. `trust-model-comparison.md` (not the pages we read) was the stale one, and has
+  been rewritten. **Open decision 1 should be revisited** — we defaulted to "managed-only" on
+  the wrong assumption; self-custody is a real, live option now.
+- **Still genuinely open, by design**: plain message/EIP-712 signing for human wallets without
+  a Safe — a new capability, not a bug fix, left for us to decide whether to request.
+
+Code changes made in response: upgraded `@1claw/wallet-react` to `^0.7.0`, deleted
+`WalletSessionContext.tsx`, simplified `AppProvidersInner.tsx`/`WalletWidget.tsx` accordingly,
+switched `NewDealForm.tsx` to the real `currentUser`. Not yet done: registering
+`allowed_origins` for the production domain, actually completing a real sign-in end to end, and
+deciding on the reopened `send({data})` scope question.
+
 **Phase 4 — Spend policies. Done (2026-09-30), conservative starting default.**
 
 Created a real, live, enforced app-level default spend policy (`POST

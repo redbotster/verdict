@@ -1,7 +1,6 @@
 "use client";
 
 import { OneclawEmbeddedWallet } from "@1claw/wallet-react";
-import { useWalletSession } from "../WalletSessionContext";
 
 // Client-safe key by design — 1Claw's plt_ platform key is a publishable identifier,
 // distinct from the org-level 1ck_ key (never exposed client-side, see .env.example).
@@ -9,8 +8,6 @@ const API_KEY = process.env.NEXT_PUBLIC_ONECLAW_PLATFORM_KEY;
 const APP_ID = process.env.NEXT_PUBLIC_ONECLAW_PLATFORM_APP_ID;
 
 export default function WalletWidget() {
-  const { setUser } = useWalletSession();
-
   if (!API_KEY || !APP_ID) {
     return (
       <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
@@ -22,7 +19,8 @@ export default function WalletWidget() {
   }
 
   // OneclawWalletProvider is mounted once at the app root (app/AppProvidersInner.tsx) so the
-  // signed-in session is shared across pages, e.g. /new — this widget just renders inside it.
+  // signed-in session (useOneclawWallet().currentUser) is shared across pages, e.g. /new — this
+  // widget just renders inside it.
   return (
     <OneclawEmbeddedWallet
       appId={APP_ID}
@@ -30,8 +28,6 @@ export default function WalletWidget() {
       features={{ send: true, swap: true, receive: true, buy: true }}
       socialProviders={["google", "apple", "discord"]}
       theme="auto"
-      onLogin={(user) => setUser(user)}
-      onLogout={() => setUser(null)}
       onError={(err) => console.error("wallet error", err)}
     />
   );

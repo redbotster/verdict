@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { createWalletClient, createPublicClient, custom, getContractAddress, type Address } from "viem";
+import { useOneclawWallet } from "@1claw/wallet-react";
 import { compileReleaseDeal, registerDeal, getDeploymentArtifact, type CompileFormInput } from "./actions";
 import { computeTermsHash } from "@/lib/terms";
-import { useWalletSession } from "../WalletSessionContext";
 import type { OracleRequestInput } from "@verdict/oracle-compiler";
 
 const ERC20_APPROVE_ABI = [
@@ -38,7 +38,7 @@ async function connectWallet(): Promise<Address> {
 }
 
 export function NewDealForm() {
-  const { user: walletUser } = useWalletSession();
+  const { currentUser: walletUser } = useOneclawWallet();
   const [step, setStep] = useState<Step>("form");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
